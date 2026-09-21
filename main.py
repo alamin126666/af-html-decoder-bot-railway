@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import asyncio, os, re, pickle, logging, tempfile, shutil
+import asyncio, base64, json, os, re, pickle, logging, tempfile, shutil
 from datetime import datetime
 from threading import Thread
 from dotenv import load_dotenv
@@ -31,7 +31,7 @@ def run_flask(): flask_app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8
 def _default_db():
     return {"users": {}, "admins": [], "channels": [],
             "settings": {"bot_active": True},
-            "stats": {"total_decodes": 0, "phpkobo": 0, "rdx": 0, "server": 0}}
+            "stats": {"total_decodes": 0, "phpkobo": 0, "custom": 0, "rdx": 0, "server": 0}}
 
 def load_db():
     if os.path.exists(DB_FILE):
@@ -39,7 +39,9 @@ def load_db():
             with open(DB_FILE, "rb") as f: data = pickle.load(f)
             for k, v in _default_db().items(): data.setdefault(k, v)
             if "phpkobo" not in data["stats"]:
-                data["stats"].update({"phpkobo": 0, "rdx": 0, "server": 0})
+                data["stats"].update({"phpkobo": 0, "custom": 0, "rdx": 0, "server": 0})
+            else:
+                data["stats"].setdefault("custom", 0)
             return data
         except Exception as e: logger.error(f"DB load error: {e}")
     return _default_db()
@@ -127,6 +129,7 @@ async def send_welcome(bot, chat_id, first_name):
         "━━━━━━━━━━━━━━━━━━\n"
         "〔 ⚙️  <b>𝗗𝗲𝗰𝗿𝘆𝗽𝘁𝗶𝗼𝗻 𝗘𝗻𝗴𝗶𝗻𝗲𝘀</b> 〕\n\n"
         "◈  ⚡ <b>𝗽𝗵𝗽𝗸𝗼𝗯𝗼</b>   ╌  𝖺𝗎𝗍𝗈-𝖽𝖾𝗍𝖾𝖼𝗍\n"
+        "◈  🧬 <b>𝗛𝗕 𝗘𝗡𝗖 𝗩𝟭</b>  ╌  𝖺𝗎𝗍𝗈-𝖽𝖾𝗍𝖾𝖼𝗍  🆕\n"
         "◈  🔓 <b>𝗥𝗗𝗫 𝘃𝟳.𝟭</b>  ╌  𝖺𝗎𝗍𝗈-𝖽𝖾𝗍𝖾𝖼𝗍  🆕\n"
         "◈  🖥️ <b>𝗦𝗲𝗿𝘃𝗲𝗿</b>    ╌  𝚜𝚝𝚊𝚗𝚍𝚊𝚛𝚍 𝚎𝚗𝚌\n"
         "━━━━━━━━━━━━━━━━━━\n\n"
@@ -240,6 +243,109 @@ def decode_phpkobo(html):
     r  = bytes(bv).decode('utf-8', errors='replace')
     if len(r) < 30: raise ValueError("Result too short")
     return r
+
+# ══════════════════════════════════════════════════════
+#   HB ENC V1 ENGINE  (symbol map + Base64 + rolling XOR)
+# ══════════════════════════════════════════════════════
+def detect_custom_cipher(html: str) -> bool:
+    """Detect the HB ENC V1 CIPHER_PAYLOAD wrapper without executing its JS."""
+    signature = (
+        "CIPHER_PAYLOAD" in html
+        or (re.search(r'const\s+_0x(?:emj|data|seed)\b', html) is not None
+            and re.search(r'(?:window\.)?atob\s*\(', html) is not None
+            and re.search(r'new\s+(?:Uint8Array|TextDecoder)', html) is not None)
+    )
+    return bool(signature and re.search(r'document\s*\.\s*write\s*\(', html, re.I))
+
+
+def _decode_custom_xor_wrapper(script_body: str):
+    """Decode one nested var _k/var _b rolling-XOR wrapper, if present."""
+    m = re.search(
+        r'var\s+_k\s*=\s*(\d+)\s*,\s*_b\s*=\s*\[([0-9,\s]+)\]',
+        script_body,
+    )
+    if not m:
+        return None
+    inc_m = re.search(r'_k\s*=\s*\(_k\s*\+\s*(\d+)\)\s*&\s*255', script_body[m.end():])
+    if not inc_m:
+        raise ValueError("HB ENC V1 XOR increment not found")
+    key, increment = int(m.group(1)), int(inc_m.group(1))
+    values = [int(x) for x in m.group(2).split(',') if x.strip()]
+    out = bytearray(len(values))
+    current = key
+    for i, value in enumerate(values):
+        out[i] = value ^ current
+        current = (current + increment) & 0xff
+    return bytes(out).decode('utf-8', errors='replace')
+
+
+def _clean_custom_nested_scripts(html: str) -> str:
+    """Replace nested encrypted CSS/JS script wrappers with clean assets."""
+    script_rx = re.compile(r'<script([^>]*)>([\s\S]*?)</script>', re.IGNORECASE)
+
+    def replace_script(match):
+        attrs, body = match.group(1), match.group(2)
+        decoded = body
+        changed = False
+        for _ in range(8):
+            next_layer = _decode_custom_xor_wrapper(decoded)
+            if next_layer is None:
+                break
+            decoded = next_layer
+            changed = True
+        if not changed:
+            return match.group(0)
+        # The sample uses one encrypted CSS block and one application JS
+        # block.  Preserve each as the correct executable asset type.
+        looks_css = bool(re.search(
+            r'(?:^|\s)(?:\*\s*,|\*\s*::(?:before|after)|[:.#][\w-]+|@(?:media|keyframes)|:root)\s*\{',
+            decoded,
+        ))
+        if looks_css and not re.search(r'^\s*(?:\(?\s*function\b|const\b|let\b|var\b)', decoded):
+            return f"<style>\n{decoded}\n</style>"
+        return f"<script{attrs}>\n{decoded}\n</script>"
+
+    return script_rx.sub(replace_script, html)
+
+
+def decode_custom_cipher(html: str) -> str:
+    """Decode HB ENC V1 CIPHER_PAYLOAD statically and fully clean nested layers."""
+    emj_match = re.search(r'const\s+_0xemj\s*=\s*(\[[\s\S]*?\]);', html)
+    data_match = re.search(r'const\s+_0xdata\s*=\s*("(?:\\.|[^"\\])*")\s*;', html)
+    seed_match = re.search(r'const\s+_0xseed\s*=\s*(\d+)\s*;', html)
+    if not (emj_match and data_match and seed_match):
+        raise ValueError("HB ENC V1 constants not found")
+
+    symbols = json.loads(emj_match.group(1))
+    data = json.loads(data_match.group(1))
+    seed = int(seed_match.group(1))
+    std = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+    if len(symbols) != len(std):
+        raise ValueError("Invalid HB ENC V1 symbol table")
+    char_map = dict(zip(symbols, std))
+    char_map["•"] = "="
+    encoded = "".join(char_map.get(ch, ch) for ch in data)
+    encoded += "=" * ((4 - len(encoded) % 4) % 4)
+    try:
+        binary = base64.b64decode(encoded, validate=True)
+    except Exception as exc:
+        raise ValueError(f"HB ENC V1 Base64 reconstruction failed: {exc}") from exc
+
+    decoded_bytes = bytearray(len(binary))
+    current = seed
+    for i, value in enumerate(binary):
+        decoded_bytes[i] = value ^ current
+        current = (current + 31) & 0xff
+    decoded = bytes(decoded_bytes).decode('utf-8', errors='replace')
+    if len(decoded) < 100 or not re.search(r'<(?:!doctype\s+html|html\b|body\b)', decoded, re.I):
+        raise ValueError("HB ENC V1 result is not valid HTML")
+
+    decoded = _clean_custom_nested_scripts(decoded)
+    # Remove only the custom protection branding/comments; keep application
+    # comments and all HTML/CSS/JS content intact.
+    decoded = re.sub(r'<!--\s*CIPHER_PAYLOAD:[\s\S]*?-->', '', decoded, flags=re.I)
+    decoded = re.sub(r'\n{3,}', '\n\n', decoded).strip() + '\n'
+    return decoded
 
 # ══════════════════════════════════════════════════════
 #   RDX DECODER v7.1 ENGINE  (Node.js subprocess)
@@ -439,7 +545,20 @@ async def _do_decode(update, context, doc, fname):
                 screenshot = await take_screenshot(out_path)
                 db["stats"]["phpkobo"] = db["stats"].get("phpkobo", 0) + 1
 
-            # ── ENGINE 2: RDX v7.1 ────────────────────────────────
+            # ── ENGINE 2: HB ENC V1 ────────────────────────────────
+            elif detect_custom_cipher(raw):
+                try: await msg.edit_text("🧬  𝗛𝗕 𝗘𝗡𝗖 𝗩𝟭 𝙳𝚎𝚝𝚎𝚌𝚝𝚎𝚍...")
+                except: pass
+                await asyncio.sleep(0.35)
+                decoded = decode_custom_cipher(raw)
+                method = "🧬  𝗛𝗕 𝗘𝗡𝗖 𝗩𝟭 𝙴𝚗𝚐𝚒𝚗𝚎"
+                with open(out_path, "w", encoding="utf-8") as f: f.write(decoded)
+                try: await msg.edit_text("🔓  𝗛𝗕 𝗘𝗡𝗖 𝗩𝟭 𝙻𝚊𝚢𝚎𝚛𝚜 𝙳𝚎𝚌𝚘𝚍𝚎𝚍...")
+                except: pass
+                screenshot = await take_screenshot(out_path)
+                db["stats"]["custom"] = db["stats"].get("custom", 0) + 1
+
+            # ── ENGINE 3: RDX v7.1 ────────────────────────────────
             elif detect_rdx(raw):
                 # Start decode task in background
                 rdx_task = asyncio.create_task(decode_rdx(in_path, out_path))
@@ -483,7 +602,7 @@ async def _do_decode(update, context, doc, fname):
                     except: pass
                     screenshot = await take_screenshot(out_path)
 
-            # ── ENGINE 3: Server / Browser ─────────────────────────
+            # ── ENGINE 4: Server / Browser ─────────────────────────
             else:
                 task = asyncio.create_task(render_html(in_path))
                 i = 0
