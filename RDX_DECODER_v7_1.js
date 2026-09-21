@@ -189,19 +189,19 @@ function makeSandbox(captureDocWrite=false){
 /* ── PATTERN DETECTOR ────────────────────────────────────────────── */
 function detectPattern(block){
   if(/try\s*\{\s*\(0,eval\)\(\w+\)\s*\}\s*catch/.test(block)) return 3;
-  if(/while\s*\(/.test(block)&&/document\s*\.\s*(write|open)\s*\(/.test(block)) return 2;
-  if(/\(0,eval\)\(\w+\)\s*;/.test(block)) return 1;
+  if(/while\s*\(/.test(block)&&/document\s*\.\s*(write|writeln|open)\s*\(/.test(block)) return 2;
+  if(/\(0\s*,\s*eval\)\(\s*[A-Za-z_$][\w$]*\s*\)\s*;?/.test(block)) return 1;
   return 0;
 }
 
 /* ── PATTERN 1 ───────────────────────────────────────────────────── */
 function decodePattern1(scriptBlock){
-  const m=scriptBlock.match(/\(0,eval\)\((\w+)\)\s*;/);
+  const m=scriptBlock.match(/\(0\s*,\s*eval\)\(\s*([A-Za-z_$][\w$]*)\s*\)\s*;?/);
   if(!m) throw new Error('P1 › eval var not found');
   const varName=m[1];
   const HOOK=`__RDX_P1_${Date.now()}__`;
   const patched=scriptBlock.replace(
-    new RegExp(`\\(0,eval\\)\\(${varName}\\)\\s*;`,'g'),
+    new RegExp(`\\(0\\s*,\\s*eval\\)\\(\\s*${varName}\\s*\\)\\s*;?`,'g'),
     `${HOOK}(${varName});`
   );
   let captured=null;
@@ -225,11 +225,11 @@ function decodePattern2(scriptBlock){
 
 /* ── PATTERN 3 ───────────────────────────────────────────────────── */
 function decodePattern3(scriptBlock){
-  const m=scriptBlock.match(/try\s*\{\s*\(0,eval\)\((\w+)\)\s*\}\s*catch\s*(\{\s*\})?/);
+  const m=scriptBlock.match(/try\s*\{\s*\(0\s*,\s*eval\)\(\s*([A-Za-z_$][\w$]*)\s*\)\s*;?\s*\}\s*catch\s*(\{\s*\})?/);
   if(!m) throw new Error('P3 › try-eval var not found');
   const varName=m[1];
   const HOOK=`__RDX_P3_${Date.now()}__`;
-  const tryPat=new RegExp(`try\\s*\\{\\s*\\(0,eval\\)\\(${varName}\\)\\s*\\}\\s*catch\\s*(\\{[^}]*\\})?`,'g');
+  const tryPat=new RegExp(`try\\s*\\{\\s*\\(0\\s*,\\s*eval\\)\\(\\s*${varName}\\s*\\)\\s*;?\\s*\\}\\s*catch\\s*(\\{[^}]*\\})?`,'g');
   const patched=scriptBlock.replace(tryPat,`try{${HOOK}(${varName})}catch{}`);
   let layer2=null;
   const {sandbox:s1}=makeSandbox(false);

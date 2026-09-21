@@ -151,7 +151,8 @@ def ban_text(uid):
 async def render_html(path):
     async with async_playwright() as pw:
         browser = await pw.chromium.launch(headless=True, args=["--no-sandbox", "--disable-setuid-sandbox"])
-        page    = await browser.new_page(viewport={"width": 1280, "height": 800})
+        context = await browser.new_context(viewport={"width": 1280, "height": 800})
+        page    = await context.new_page()
         await page.goto(f"file://{os.path.abspath(path)}", wait_until="networkidle", timeout=30000)
         await asyncio.sleep(3)
         html       = await page.evaluate("() => document.documentElement.outerHTML")
@@ -162,8 +163,25 @@ async def render_html(path):
 async def take_screenshot(html_path):
     async with async_playwright() as pw:
         browser = await pw.chromium.launch(headless=True, args=["--no-sandbox", "--disable-setuid-sandbox"])
-        page    = await browser.new_page(viewport={"width": 1280, "height": 800})
-        await page.goto(f"file://{os.path.abspath(html_path)}", wait_until="networkidle", timeout=30000)
+        context = await browser.new_context(viewport={"width": 1280, "height": 800})
+
+        # A decoded file may still contain third-party scripts or an embedded
+        # redirect.  Screenshots must render the decoded artifact only; they
+        # must never turn a successful RDX decode into another server render.
+        async def block_external(route):
+            url = route.request.url.lower()
+            if url.startswith(("http://", "https://", "ws://", "wss://")):
+                await route.abort()
+            else:
+                await route.continue_()
+
+        await context.route("**/*", block_external)
+        page = await context.new_page()
+        await page.goto(
+            f"file://{os.path.abspath(html_path)}",
+            wait_until="domcontentloaded",
+            timeout=30000,
+        )
         await asyncio.sleep(2)
         screenshot = await page.screenshot(full_page=True, type="png")
         await browser.close()
@@ -181,10 +199,16 @@ def _js_unescape(s):
     return s
 
 def detect_phpkobo(html):
-    sm = re.search(r'<script[^>]*>([\s\S]*?)<\/script>', html, re.IGNORECASE)
-    if not sm: return False
-    sc = sm.group(1).lstrip(';').strip()
-    return 'Function("' in sc or "Function('" in sc
+    # Do not inspect only the first script: phpkobo wrappers are often
+    # preceded by a small bootstrap/config block.  Require both the dynamic
+    # Function constructor and its characteristic _Srkpv/B payload marker.
+    for sm in re.finditer(r'<script[^>]*>([\s\S]*?)<\/script>', html, re.IGNORECASE):
+        sc = sm.group(1)
+        has_function = re.search(r'\bFunction\s*\(\s*["\']', sc) is not None
+        has_payload = re.search(r'_Srkpv\s*=|\bB[0-9A-Za-z\\]{8,}', sc) is not None
+        if has_function and has_payload:
+            return True
+    return False
 
 def decode_phpkobo(html):
     sm = re.search(r'<script[^>]*>([\s\S]*?)<\/script>', html, re.IGNORECASE)
@@ -221,18 +245,22 @@ def decode_phpkobo(html):
 #   RDX DECODER v7.1 ENGINE  (Node.js subprocess)
 # ══════════════════════════════════════════════════════
 def detect_rdx(html: str) -> bool:
-    """Detect RDX obfuscation — Pattern 1 / 2 / 3."""
+    """Detect RDX obfuscation — tolerate minification and wrapper variants."""
     for sm in re.finditer(r'<script[^>]*>([\s\S]*?)<\/script>', html, re.IGNORECASE):
         sc = sm.group(1)
-        if len(sc) < 400: continue
-        # P1: (0,eval)(varName);
-        if re.search(r'\(0,eval\)\(\w+\)\s*;', sc):
+        if len(sc) < 180:
+            continue
+        # P1/P3: indirect eval of a variable, with or without a semicolon.
+        if re.search(r'\(0\s*,\s*eval\)\(\s*[A-Za-z_$][\w$]*\s*\)', sc):
             return True
-        # P3: try { (0,eval)(varName) } catch
-        if re.search(r'try\s*\{\s*\(0,eval\)\(\w+\)\s*\}\s*catch', sc):
+        if re.search(r'try\s*\{[\s\S]{0,120}\(0\s*,\s*eval\)\(', sc):
             return True
-        # P2: while(...) + document.write / document.open
-        if re.search(r'while\s*\(', sc) and re.search(r'document\s*\.\s*(?:write|open)\s*\(', sc):
+        # P2 and hybrid wrappers: decoder loop plus document output.
+        if re.search(r'while\s*\(', sc) and re.search(r'document\s*\.\s*(?:write|writeln|open)\s*\(', sc):
+            return True
+        if re.search(r'(?:document\s*\.\s*open|document\s*\.\s*write)', sc) and re.search(
+            r'(?:fromCharCode|decodeURIComponent|atob|String\.fromCharCode|_\$)', sc
+        ):
             return True
     return False
 
@@ -425,14 +453,17 @@ async def _do_decode(update, context, doc, fname):
                     try: await msg.edit_text("⚙️  𝙵𝚒𝚗𝚊𝚕𝚒𝚣𝚒𝚗𝚐 𝚁𝙳𝚇 𝚍𝚎𝚌𝚘𝚍𝚎...")
                     except: pass
                 try:
+                    # Keep the fallback boundary around decoding only.  A
+                    # screenshot/rendering failure must not re-run the
+                    # encrypted input through the Server engine.
                     decoded    = await rdx_task
                     method     = "🔓  𝗥𝗗𝗫 𝘃𝟳.𝟭 𝙴𝚗𝚐𝚒𝚗𝚎"
-                    try: await msg.edit_text("📸  𝙲𝚊𝚙𝚝𝚞𝚛𝚒𝚗𝚐 𝚜𝚌𝚛𝚎𝚎𝚗𝚜𝚑𝚘𝚝...")
-                    except: pass
-                    screenshot = await take_screenshot(out_path)
+                    with open(out_path, "w", encoding="utf-8") as f:
+                        f.write(decoded)
                     db["stats"]["rdx"] = db["stats"].get("rdx", 0) + 1
                 except Exception as rdx_e:
-                    # Fallback to Server engine
+                    # Fallback to Server engine only when the RDX decoder
+                    # itself failed.  Never use it for screenshot failures.
                     logger.warning(f"RDX engine failed ({rdx_e}), falling back to Server engine")
                     try: await msg.edit_text("⚠️  𝚁𝙳𝚇 𝚏𝚊𝚒𝚕𝚎𝚍, 𝚞𝚜𝚒𝚗𝚐 𝚂𝚎𝚛𝚟𝚎𝚛 𝙴𝚗𝚐𝚒𝚗𝚎...")
                     except: pass
@@ -444,9 +475,13 @@ async def _do_decode(update, context, doc, fname):
                         except: pass
                         i += 1; await asyncio.sleep(1.4)
                     decoded, screenshot = await task
-                    method = "🖥️  𝗦𝗲𝗿𝘃𝗲𝗿 𝙴𝚗𝚐𝚒𝚗𝚎 (𝚏𝚊𝚕𝚕𝚋𝚊𝚌𝚔)"
+                    method = "🖥️  𝗦𝗲𝗿𝘃𝗲𝗿 𝙴𝚗𝚐𝚒𝚗𝚎 (𝚏𝚊𝚕𝗹𝗯𝗮𝗰𝗸)"
                     with open(out_path, "w", encoding="utf-8") as f: f.write(decoded)
                     db["stats"]["server"] = db["stats"].get("server", 0) + 1
+                else:
+                    try: await msg.edit_text("📸  𝙲𝚊𝚙𝚝𝚞𝚛𝚒𝚗𝚐 𝚜𝚌𝚛𝚎𝚎𝚗𝚜𝚑𝚘𝚝...")
+                    except: pass
+                    screenshot = await take_screenshot(out_path)
 
             # ── ENGINE 3: Server / Browser ─────────────────────────
             else:
