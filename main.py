@@ -8,6 +8,7 @@ from flask import Flask
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
 from telegram.constants import ParseMode
+from telegram.error import RetryAfter, BadRequest
 from playwright.async_api import async_playwright
 
 BOT_TOKEN      = os.environ.get("BOT_TOKEN", "")
@@ -19,6 +20,35 @@ if not OWNER_ID:  raise ValueError("OWNER_ID not set.")
 
 logging.basicConfig(format="%(asctime)s | %(levelname)s | %(message)s", level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# ══════════════════════════════════════════════════════
+#   RATE-LIMIT-SAFE  editMessageText  WRAPPER
+# ══════════════════════════════════════════════════════
+async def safe_edit(msg, text, **kwargs):
+    """Edit a message, honouring Telegram's 429 retry_after header.
+
+    Telegram enforces ~1 editMessageText/second per chat.  When the bot
+    sends animation frames faster than that it receives HTTP 429 with a
+    Retry-After header.  python-telegram-bot raises RetryAfter; without
+    this wrapper those errors are silently swallowed and the API keeps
+    getting hammered, producing the flood of 429s visible in the logs.
+
+    This wrapper sleeps for the server-mandated delay (plus a 0.5 s
+    safety margin) and tries up to 3 times before giving up quietly.
+    """
+    for attempt in range(3):
+        try:
+            await msg.edit_text(text, **kwargs)
+            return
+        except RetryAfter as e:
+            wait = e.retry_after + 0.5
+            logger.warning(f"Rate-limited (429) — sleeping {wait:.1f}s (attempt {attempt+1})")
+            await asyncio.sleep(wait)
+        except BadRequest:
+            # "Message is not modified" or similar — not an error worth retrying
+            return
+        except Exception:
+            return
 
 flask_app = Flask(__name__)
 @flask_app.route("/")
@@ -405,22 +435,16 @@ async def decode_rdx(in_path: str, out_path: str) -> str:
 #   INIT ANIMATION  — New Braille Spinner
 # ══════════════════════════════════════════════════════
 _INIT_FRAMES = [
-    "⠋  𝙱𝚘𝚘𝚝𝚒𝚗𝚐 𝚜𝚢𝚜𝚝𝚎𝚖...",
-    "⠙  𝙻𝚘𝚊𝚍𝚒𝚗𝚐 𝙲𝚘𝚛𝚎...",
     "⠸  𝙸𝚗𝚒𝚝 𝙴𝚗𝚐𝚒𝚗𝚎𝚜...",
-    "⠼  𝙲𝚊𝚕𝚒𝚋𝚛𝚊𝚝𝚒𝚗𝚐...",
-    "⠤  𝙳𝚒𝚊𝚐𝚗𝚘𝚜𝚝𝚒𝚌𝚜...",
     "⠦  𝚅𝚎𝚛𝚒𝚏𝚢𝚒𝚗𝚐...",
-    "⡀  𝙶𝚎𝚝𝚝𝚒𝚗𝚐 𝚛𝚎𝚊𝚍𝚢...",
     "✦  𝗔𝗟𝗟  𝗦𝗬𝗦𝗧𝗘𝗠𝗦  𝗚𝗢!",
 ]
 
 async def _decode_start(update, context):
     msg = await update.message.reply_text("⠿  𝙸𝚗𝚒𝚝𝚒𝚊𝚕𝚒𝚣𝚒𝚗𝚐...")
     for frame in _INIT_FRAMES:
-        await asyncio.sleep(0.45)
-        try: await msg.edit_text(frame)
-        except: pass
+        await asyncio.sleep(3.0)
+        await safe_edit(msg, frame)
     await asyncio.sleep(0.5)
     try: await msg.delete()
     except: pass
@@ -440,10 +464,6 @@ async def _decode_start(update, context):
 # ══════════════════════════════════════════════════════
 _PK = [
     ("🔎", "𝙴𝚗𝚌𝚛𝚢𝚙𝚝 𝚃𝚢𝚙𝚎  ╌  𝗽𝗵𝗽𝗸𝗼𝗯𝗼"),
-    ("🔑", "𝙵𝚞𝚗𝚌𝚝𝚒𝚘𝚗 𝚆𝚛𝚊𝚙𝚙𝚎𝚛 𝙻𝚘𝚌𝚊𝚝𝚎𝚍"),
-    ("📦", "𝙿𝚊𝚢𝚕𝚘𝚊𝚍 𝙴𝚡𝚝𝚛𝚊𝚌𝚝𝚎𝚍"),
-    ("🧩", "𝙱-𝙼𝚊𝚛𝚔𝚎𝚛 𝙵𝚘𝚞𝚗𝚍"),
-    ("📐", "𝙲𝚒𝚙𝚑𝚎𝚛 𝙷𝚎𝚊𝚍𝚎𝚛 𝙰𝚗𝚊𝚕𝚢𝚣𝚎𝚍"),
     ("🔓", "𝙱𝚢𝚝𝚎𝚜 𝙳𝚎𝚌𝚛𝚢𝚙𝚝𝚎𝚍"),
     ("💾", "𝙾𝚞𝚝𝚙𝚞𝚝 𝚂𝚊𝚟𝚎𝚍"),
 ]
@@ -462,11 +482,7 @@ def _pk_msg(cur):
 # ══════════════════════════════════════════════════════
 _RDX = [
     ("🔍", "𝙴𝚗𝚌𝚛𝚢𝚙𝚝 𝚃𝚢𝚙𝚎  ╌  𝗥𝗗𝗫 𝘃𝟳.𝟭"),
-    ("🧬", "𝙱𝚕𝚘𝚌𝚔 𝙳𝚎𝚝𝚎𝚌𝚝𝚒𝚘𝚗"),
-    ("⚙️", "𝚂𝚊𝚗𝚍𝚋𝚘𝚡 𝙸𝚗𝚒𝚝𝚒𝚊𝚕𝚒𝚣𝚒𝚗𝚐"),
-    ("🔑", "𝙻𝚊𝚢𝚎𝚛 𝟷  𝙳𝚎𝚌𝚘𝚍𝚒𝚗𝚐"),
-    ("🔓", "𝙻𝚊𝚢𝚎𝚛 𝟸  𝚁𝚎𝚜𝚘𝚕𝚟𝚒𝚗𝚐"),
-    ("🛡", "𝚂𝚝𝚛𝚞𝚌𝚝𝚞𝚛𝚎 𝚅𝚊𝚕𝚒𝚍𝚊𝚝𝚒𝚗𝚐"),
+    ("🔑", "𝙻𝚊𝚢𝚎𝚛 𝙳𝚎𝚌𝚘𝚍𝚒𝚗𝚐"),
     ("💾", "𝙾𝚞𝚝𝚙𝚞𝚝 𝚂𝚊𝚟𝚎𝚍"),
 ]
 
@@ -484,13 +500,7 @@ def _rdx_msg(cur):
 # ══════════════════════════════════════════════════════
 _BR = [
     ( 0,  "𝙴𝚗𝚌𝚛𝚢𝚙𝚝 𝚃𝚢𝚙𝚎  ╌  𝗦𝗲𝗿𝘃𝗲𝗿"),
-    (12,  "𝙻𝚊𝚞𝚗𝚌𝚑𝚒𝚗𝚐 𝙲𝚑𝚛𝚘𝚖𝚒𝚞𝚖..."),
-    (26,  "𝙻𝚘𝚊𝚍𝚒𝚗𝚐 𝙴𝚗𝚐𝚒𝚗𝚎..."),
-    (40,  "𝚂𝚎𝚛𝚟𝚎𝚛 𝚁𝚞𝚗𝚗𝚒𝚗𝚐..."),
-    (55,  "𝚂𝚌𝚊𝚗𝚗𝚒𝚗𝚐 𝙷𝚃𝙼𝙻..."),
-    (68,  "𝚁𝚎𝚗𝚍𝚎𝚛𝚒𝚗𝚐 𝙿𝚊𝚐𝚎..."),
-    (80,  "𝙴𝚡𝚝𝚛𝚊𝚌𝚝𝚒𝚗𝚐 𝙳𝚊𝚝𝚊..."),
-    (91,  "𝙱𝚞𝚒𝚕𝚍𝚒𝚗𝚐 𝙾𝚞𝚝𝚙𝚞𝚝..."),
+    (50,  "𝚁𝚎𝚊𝚍 𝚃𝚑𝚎 𝙷𝚝𝚖𝚕.."),
     (97,  "𝙵𝚒𝚗𝚊𝚕𝚒𝚣𝚒𝚗𝚐..."),
 ]
 
@@ -509,12 +519,8 @@ def _br_msg(idx):
 # ══════════════════════════════════════════════════════
 async def _do_decode(update, context, doc, fname):
     msg = await update.message.reply_text("🛰️  𝙴𝚜𝚝𝚊𝚋𝚕𝚒𝚜𝚑𝚒𝚗𝚐 𝚌𝚘𝚗𝚗𝚎𝚌𝚝𝚒𝚘𝚗...")
-    for s in ["📥  𝙳𝚘𝚠𝚗𝚕𝚘𝚊𝚍𝚒𝚗𝚐 𝚏𝚒𝚕𝚎...",
-              "🔬  𝙸𝚗𝚜𝚙𝚎𝚌𝚝𝚒𝚗𝚐 𝚜𝚝𝚛𝚞𝚌𝚝𝚞𝚛𝚎...",
-              "🧪  𝙰𝚗𝚊𝚕𝚢𝚣𝚒𝚗𝚐 𝚎𝚗𝚌𝚛𝚢𝚙𝚝𝚒𝚘𝚗..."]:
-        await asyncio.sleep(0.75)
-        try: await msg.edit_text(s)
-        except: pass
+    await asyncio.sleep(3.0)
+    await safe_edit(msg, "🧪  𝙰𝚗𝚊𝚕𝚢𝚣𝚒𝚗𝚐 𝚎𝚗𝚌𝚛𝚢𝚙𝚝𝚒𝚘𝚗...")
 
     try:
         file_obj = await context.bot.get_file(doc.file_id)
@@ -534,27 +540,23 @@ async def _do_decode(update, context, doc, fname):
             # ── ENGINE 1: phpkobo ──────────────────────────────────
             if detect_phpkobo(raw):
                 for step in range(len(_PK)):
-                    try: await msg.edit_text(_pk_msg(step), parse_mode=ParseMode.HTML)
-                    except: pass
-                    await asyncio.sleep(0.55)
+                    await safe_edit(msg, _pk_msg(step), parse_mode=ParseMode.HTML)
+                    await asyncio.sleep(3.0)
                 decoded = decode_phpkobo(raw)
                 method  = "⚡  𝗽𝗵𝗽𝗸𝗼𝗯𝗼 𝙴𝚗𝚐𝚒𝚗𝚎"
                 with open(out_path, "w", encoding="utf-8") as f: f.write(decoded)
-                try: await msg.edit_text("📸  𝙲𝚊𝚙𝚝𝚞𝚛𝚒𝚗𝚐 𝚜𝚌𝚛𝚎𝚎𝚗𝚜𝚑𝚘𝚝...")
-                except: pass
+                await safe_edit(msg, "📸  𝙲𝚊𝚙𝚝𝚞𝚛𝚒𝚗𝚐 𝚜𝚌𝚛𝚎𝚎𝚗𝚜𝚑𝚘𝚝...")
                 screenshot = await take_screenshot(out_path)
                 db["stats"]["phpkobo"] = db["stats"].get("phpkobo", 0) + 1
 
             # ── ENGINE 2: HB ENC V1 ────────────────────────────────
             elif detect_custom_cipher(raw):
-                try: await msg.edit_text("🧬  𝗛𝗕 𝗘𝗡𝗖 𝗩𝟭 𝙳𝚎𝚝𝚎𝚌𝚝𝚎𝚍...")
-                except: pass
-                await asyncio.sleep(0.35)
+                await safe_edit(msg, "🧬  𝗛𝗕 𝗘𝗡𝗖 𝗩𝟭 𝙳𝚎𝚝𝚎𝚌𝚝𝚎𝚍...")
+                await asyncio.sleep(3.0)
                 decoded = decode_custom_cipher(raw)
                 method = "🧬  𝗛𝗕 𝗘𝗡𝗖 𝗩𝟭 𝙴𝚗𝚐𝚒𝚗𝚎"
                 with open(out_path, "w", encoding="utf-8") as f: f.write(decoded)
-                try: await msg.edit_text("🔓  𝗛𝗕 𝗘𝗡𝗖 𝗩𝟭 𝙻𝚊𝚢𝚎𝚛𝚜 𝙳𝚎𝚌𝚘𝚍𝚎𝚍...")
-                except: pass
+                await safe_edit(msg, "🔓  𝗛𝗕 𝗘𝗡𝗖 𝗩𝟭 𝙻𝚊𝚢𝚎𝚛𝚜 𝙳𝚎𝚌𝚘𝚍𝚎𝚍...")
                 screenshot = await take_screenshot(out_path)
                 db["stats"]["custom"] = db["stats"].get("custom", 0) + 1
 
@@ -564,13 +566,11 @@ async def _do_decode(update, context, doc, fname):
                 rdx_task = asyncio.create_task(decode_rdx(in_path, out_path))
                 # Show animated checklist while task runs
                 for step in range(len(_RDX)):
-                    try: await msg.edit_text(_rdx_msg(step), parse_mode=ParseMode.HTML)
-                    except: pass
-                    await asyncio.sleep(0.65)
+                    await safe_edit(msg, _rdx_msg(step), parse_mode=ParseMode.HTML)
+                    await asyncio.sleep(3.0)
                 # If still running, show finalizing
                 if not rdx_task.done():
-                    try: await msg.edit_text("⚙️  𝙵𝚒𝚗𝚊𝚕𝚒𝚣𝚒𝚗𝚐 𝚁𝙳𝚇 𝚍𝚎𝚌𝚘𝚍𝚎...")
-                    except: pass
+                    await safe_edit(msg, "⚙️  𝙵𝚒𝚗𝚊𝚕𝚒𝚣𝚒𝚗𝚐 𝚁𝙳𝚇 𝚍𝚎𝚌𝚘𝚍𝚎...")
                 try:
                     # Keep the fallback boundary around decoding only.  A
                     # screenshot/rendering failure must not re-run the
@@ -584,22 +584,19 @@ async def _do_decode(update, context, doc, fname):
                     # Fallback to Server engine only when the RDX decoder
                     # itself failed.  Never use it for screenshot failures.
                     logger.warning(f"RDX engine failed ({rdx_e}), falling back to Server engine")
-                    try: await msg.edit_text("⚠️  𝚁𝙳𝚇 𝚏𝚊𝚒𝚕𝚎𝚍, 𝚞𝚜𝚒𝚗𝚐 𝚂𝚎𝚛𝚟𝚎𝚛 𝙴𝚗𝚐𝚒𝚗𝚎...")
-                    except: pass
-                    await asyncio.sleep(0.7)
+                    await safe_edit(msg, "⚠️  𝚁𝙳𝚇 𝚏𝚊𝚒𝚕𝚎𝚍, 𝚞𝚜𝚒𝚗𝚐 𝚂𝚎𝚛𝚟𝚎𝚛 𝙴𝚗𝚐𝚒𝚗𝚎...")
+                    await asyncio.sleep(3.0)
                     task = asyncio.create_task(render_html(in_path))
                     i = 0
                     while not task.done():
-                        try: await msg.edit_text(_br_msg(i), parse_mode=ParseMode.HTML)
-                        except: pass
-                        i += 1; await asyncio.sleep(1.4)
+                        await safe_edit(msg, _br_msg(i), parse_mode=ParseMode.HTML)
+                        i += 1; await asyncio.sleep(3.0)
                     decoded, screenshot = await task
                     method = "🖥️  𝗦𝗲𝗿𝘃𝗲𝗿 𝙴𝚗𝚐𝚒𝚗𝚎 (𝚏𝚊𝚕𝗹𝗯𝗮𝗰𝗸)"
                     with open(out_path, "w", encoding="utf-8") as f: f.write(decoded)
                     db["stats"]["server"] = db["stats"].get("server", 0) + 1
                 else:
-                    try: await msg.edit_text("📸  𝙲𝚊𝚙𝚝𝚞𝚛𝚒𝚗𝚐 𝚜𝚌𝚛𝚎𝚎𝚗𝚜𝚑𝚘𝚝...")
-                    except: pass
+                    await safe_edit(msg, "📸  𝙲𝚊𝚙𝚝𝚞𝚛𝚒𝚗𝚐 𝚜𝚌𝚛𝚎𝚎𝚗𝚜𝚑𝚘𝚝...")
                     screenshot = await take_screenshot(out_path)
 
             # ── ENGINE 4: Server / Browser ─────────────────────────
@@ -607,9 +604,8 @@ async def _do_decode(update, context, doc, fname):
                 task = asyncio.create_task(render_html(in_path))
                 i = 0
                 while not task.done():
-                    try: await msg.edit_text(_br_msg(i), parse_mode=ParseMode.HTML)
-                    except: pass
-                    i += 1; await asyncio.sleep(1.4)
+                    await safe_edit(msg, _br_msg(i), parse_mode=ParseMode.HTML)
+                    i += 1; await asyncio.sleep(3.0)
                 decoded, screenshot = await task
                 method = "🖥️  𝗦𝗲𝗿𝘃𝗲𝗿 𝙴𝚗𝚐𝚒𝚗𝚎"
                 with open(out_path, "w", encoding="utf-8") as f: f.write(decoded)
@@ -620,8 +616,7 @@ async def _do_decode(update, context, doc, fname):
             save_db(db)
 
             # ── Send results ───────────────────────────────────────
-            try: await msg.edit_text("✦  𝙳𝚘𝚗𝚎!  𝚂𝚎𝚗𝚍𝚒𝚗𝚐 𝚛𝚎𝚜𝚞𝚕𝚝𝚜...")
-            except: pass
+            await safe_edit(msg, "✦  𝙳𝚘𝚗𝚎!  𝚂𝚎𝚗𝚍𝚒𝚗𝚐 𝚛𝚎𝚜𝚞𝚕𝚝𝚜...")
             await asyncio.sleep(0.4)
 
             import io
@@ -652,14 +647,13 @@ async def _do_decode(update, context, doc, fname):
 
     except Exception as e:
         logger.error(f"Decode error: {e}")
-        try:
-            await msg.edit_text(
-                "╔══════════════════╗\n"
-                "  ❌  <b>𝗗𝗲𝗰𝗼𝗱𝗲 𝗙𝗮𝗶𝗹𝗲𝗱</b>\n"
-                "╚══════════════════╝\n\n"
-                f"<code>{e}</code>",
-                parse_mode=ParseMode.HTML)
-        except: pass
+        await safe_edit(
+            msg,
+            "╔══════════════════╗\n"
+            "  ❌  <b>𝗗𝗲𝗰𝗼𝗱𝗲 𝗙𝗮𝗶𝗹𝗲𝗱</b>\n"
+            "╚══════════════════╝\n\n"
+            f"<code>{e}</code>",
+            parse_mode=ParseMode.HTML)
 
 # ══════════════════════════════════════════════════════
 #   DEVELOPER INFO  — New Design
@@ -1067,15 +1061,14 @@ async def _process_admin_input(update, context, action, text):
         for uid in list(db["users"].keys()):
             try: await context.bot.send_message(uid,btxt,reply_markup=markup); ok+=1
             except: fail+=1
+            await asyncio.sleep(0.05)  # ~20 sends/s to stay under global rate limit
             if (ok+fail)%20==0 or (ok+fail)==total:
-                try: await prog.edit_text(f"📣  𝙱𝚛𝚘𝚊𝚍𝚌𝚊𝚜𝚝𝚒𝚗𝚐...\n✅ {ok}  ❌ {fail}  /  {total}")
-                except: pass
-        try:
-            await prog.edit_text(
-                "╔══════════════════════╗\n  📣  <b>𝗕𝗿𝗼𝗮𝗱𝗰𝗮𝘀𝘁 𝗖𝗼𝗺𝗽𝗹𝗲𝘁𝗲!</b>\n╚══════════════════════╝\n\n"
-                f"✅  𝚂𝚎𝚗𝚝    ╌  <b>{ok}</b>\n❌  𝙵𝚊𝚒𝚕𝚎𝚍  ╌  <b>{fail}</b>\n👥  𝚃𝚘𝚝𝚊𝚕   ╌  <b>{total}</b>",
-                parse_mode=ParseMode.HTML)
-        except: pass
+                await safe_edit(prog, f"📣  𝙱𝚛𝚘𝚊𝚍𝚌𝚊𝚜𝚝𝚒𝚗𝚐...\n✅ {ok}  ❌ {fail}  /  {total}")
+        await safe_edit(
+            prog,
+            "╔══════════════════════╗\n  📣  <b>𝗕𝗿𝗼𝗮𝗱𝗰𝗮𝘀𝘁 𝗖𝗼𝗺𝗽𝗹𝗲𝘁𝗲!</b>\n╚══════════════════════╝\n\n"
+            f"✅  𝚂𝚎𝚗𝚝    ╌  <b>{ok}</b>\n❌  𝙵𝚊𝚒𝚕𝚎𝚍  ╌  <b>{fail}</b>\n👥  𝚃𝚘𝚝𝚊𝚕   ╌  <b>{total}</b>",
+            parse_mode=ParseMode.HTML)
 
 # ══════════════════════════════════════════════════════
 #   MAIN
