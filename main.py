@@ -5,7 +5,7 @@ from threading import Thread
 from dotenv import load_dotenv
 load_dotenv()
 from flask import Flask
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup
+from telegram import Update, InlineKeyboardButton as _TelegramInlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
 from telegram.constants import ParseMode
 from telegram.error import RetryAfter, BadRequest
@@ -20,6 +20,158 @@ if not OWNER_ID:  raise ValueError("OWNER_ID not set.")
 
 logging.basicConfig(format="%(asctime)s | %(levelname)s | %(message)s", level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# Telegram Bot API 9.4 button accents are presets, not arbitrary hex colors.
+# Premium custom emoji IDs are optional and are supplied by the bot owner.
+_BUTTON_STYLES = {"primary", "success", "danger"}
+_EMOJI_ID_DEFAULTS = {
+    "BUTTON_EMOJI_DECODE": "6057408307029613998",
+    "BUTTON_EMOJI_DEVELOPER": "5418063924933173277",
+    "BUTTON_EMOJI_CHANNEL": "5413337163100083587",
+    "BUTTON_EMOJI_PRIVATE_CHANNEL": "5197288647275071607",
+    "BUTTON_EMOJI_JOINED": "6226699395098745883",
+    "BUTTON_EMOJI_CONTACT": "4956475826762679249",
+    "PREMIUM_EMOJI_LIGHTNING_ID": "6057408307029613998",
+    "PREMIUM_EMOJI_BRAND_ID": "5212936673423274058",
+    "PREMIUM_EMOJI_DEVELOPER_ID": "5418063924933173277",
+    "PREMIUM_EMOJI_RADAR_ID": "5413337163100083587",
+    "PREMIUM_EMOJI_LOCK_ID": "5197288647275071607",
+    "PREMIUM_EMOJI_CHECK_ID": "6226699395098745883",
+    "PREMIUM_EMOJI_UNLOCK_ID": "5291873529464122510",
+    "PREMIUM_EMOJI_SEARCH_ID": "5188311512791393083",
+    "PREMIUM_EMOJI_RDX_SEARCH_ID": "6332075107741075109",
+    "PREMIUM_EMOJI_KEY_ID": "5278573677900752088",
+    "PREMIUM_EMOJI_SAVE_ID": "5373342633798167891",
+    "PREMIUM_EMOJI_SERVER_ID": "4956324463525233747",
+    "PREMIUM_EMOJI_CAMERA_ID": "5260623291583831521",
+    "PREMIUM_EMOJI_IMAGE_ID": "6082610788575485716",
+    "PREMIUM_EMOJI_ATTACHMENT_ID": "5377844313575150051",
+    "PREMIUM_EMOJI_GEAR_ID": "5341715473882955310",
+    "PREMIUM_EMOJI_STATS_ID": "6226505614764285291",
+    "PREMIUM_EMOJI_USERS_ID": "5453957997418004470",
+    "PREMIUM_EMOJI_ALIEN_ID": "5370869711888194012",
+    "PREMIUM_EMOJI_FOLDER_ID": "5431736674147114227",
+    "PREMIUM_EMOJI_CLIPBOARD_ID": "5197269100878907942",
+    "PREMIUM_EMOJI_DIAMOND_ID": "5314382594068984646",
+    "PREMIUM_EMOJI_WARNING_ID": "6100210821525150079",
+    "PREMIUM_EMOJI_CHECKMARK_ID": "6226569455158172824",
+    "PREMIUM_EMOJI_CROSS_ID": "6294194896349699910",
+    "PREMIUM_EMOJI_ADD_ID": "4956507094124594921",
+    "PREMIUM_EMOJI_TARGET_ID": "5310278924616356636",
+    "PREMIUM_EMOJI_TAG_ID": "5240228673738527951",
+    "PREMIUM_EMOJI_CROWN_ID": "4958725487682650920",
+    "PREMIUM_EMOJI_BULB_ID": "6100202351849642503",
+    "PREMIUM_EMOJI_SPEECH_ID": "4956475826762679249",
+    "PREMIUM_EMOJI_COMPUTER_ID": "5193177581888755275",
+    "PREMIUM_EMOJI_PIN_ID": "6226705193304595830",
+    "PREMIUM_EMOJI_ANNOUNCEMENT_ID": "6068999367199561082",
+    "PREMIUM_EMOJI_BACK_ID": "6114123268568914133",
+    "PREMIUM_EMOJI_RED_CIRCLE_ID": "6069113458710811277",
+    "PREMIUM_EMOJI_BLUE_DIAMOND_ID": "5456145097844340698",
+    "PREMIUM_EMOJI_ORANGE_DIAMOND_ID": "5206676058509696004",
+    "PREMIUM_EMOJI_BLUE_SQUARE_ID": "6320953010755214903",
+    "PREMIUM_EMOJI_DOWN_TRIANGLE_ID": "5017305457165861770",
+    "PREMIUM_EMOJI_BLACK_HEART_ID": "6160962640005831966",
+    "PREMIUM_EMOJI_CABINET_ID": "5262529363710060188",
+    "PREMIUM_EMOJI_TRASH_ID": "4958534924278694938",
+    "PREMIUM_EMOJI_ROBOT_ID": "5372981976804366741",
+    "PREMIUM_EMOJI_TEST_TUBE_ID": "4956561910792192697",
+    "PREMIUM_EMOJI_ID_BADGE_ID": "5260561650213220533",
+    "PREMIUM_EMOJI_NO_ENTRY_ID": "5424857974784925603",
+    "PREMIUM_EMOJI_TOOLS_ID": "5863945989127148135",
+    "PREMIUM_EMOJI_SHIELD_ID": "4958900559139570572",
+    "PREMIUM_EMOJI_SATELLITE_ID": "5467403607286502523",
+    "PREMIUM_EMOJI_GREEN_CIRCLE_ID": "5267231042934154418",
+    "PREMIUM_EMOJI_NEW_ID": "6255963343748601579",
+}
+
+_PREMIUM_EMOJI_SETTINGS = {
+    "🧑‍💻": "PREMIUM_EMOJI_DEVELOPER_ID", "🧬": "PREMIUM_EMOJI_BRAND_ID",
+    "⚡": "PREMIUM_EMOJI_LIGHTNING_ID", "📡": "PREMIUM_EMOJI_RADAR_ID",
+    "🔐": "PREMIUM_EMOJI_LOCK_ID", "✅": "PREMIUM_EMOJI_CHECK_ID",
+    "🔓": "PREMIUM_EMOJI_UNLOCK_ID", "🔎": "PREMIUM_EMOJI_SEARCH_ID",
+    "🔍": "PREMIUM_EMOJI_RDX_SEARCH_ID", "🔑": "PREMIUM_EMOJI_KEY_ID",
+    "💾": "PREMIUM_EMOJI_SAVE_ID", "🖥️": "PREMIUM_EMOJI_SERVER_ID",
+    "📸": "PREMIUM_EMOJI_CAMERA_ID", "🖼️": "PREMIUM_EMOJI_IMAGE_ID",
+    "📎": "PREMIUM_EMOJI_ATTACHMENT_ID", "⚙️": "PREMIUM_EMOJI_GEAR_ID",
+    "📊": "PREMIUM_EMOJI_STATS_ID", "👥": "PREMIUM_EMOJI_USERS_ID",
+    "👾": "PREMIUM_EMOJI_ALIEN_ID", "🗂": "PREMIUM_EMOJI_FOLDER_ID",
+    "📋": "PREMIUM_EMOJI_CLIPBOARD_ID",
+    "♦": "PREMIUM_EMOJI_DIAMOND_ID", "⚠️": "PREMIUM_EMOJI_WARNING_ID",
+    "✔": "PREMIUM_EMOJI_CHECKMARK_ID", "❌": "PREMIUM_EMOJI_CROSS_ID",
+    "➕": "PREMIUM_EMOJI_ADD_ID", "🎯": "PREMIUM_EMOJI_TARGET_ID",
+    "🏷": "PREMIUM_EMOJI_TAG_ID", "👑": "PREMIUM_EMOJI_CROWN_ID",
+    "💡": "PREMIUM_EMOJI_BULB_ID", "💬": "PREMIUM_EMOJI_SPEECH_ID",
+    "💻": "PREMIUM_EMOJI_COMPUTER_ID", "📌": "PREMIUM_EMOJI_PIN_ID",
+    "📣": "PREMIUM_EMOJI_ANNOUNCEMENT_ID", "🔙": "PREMIUM_EMOJI_BACK_ID",
+    "🔴": "PREMIUM_EMOJI_RED_CIRCLE_ID", "🔷": "PREMIUM_EMOJI_BLUE_DIAMOND_ID",
+    "🔸": "PREMIUM_EMOJI_ORANGE_DIAMOND_ID", "🔹": "PREMIUM_EMOJI_BLUE_SQUARE_ID",
+    "🔻": "PREMIUM_EMOJI_DOWN_TRIANGLE_ID", "🖤": "PREMIUM_EMOJI_BLACK_HEART_ID",
+    "🗄": "PREMIUM_EMOJI_CABINET_ID", "🗑": "PREMIUM_EMOJI_TRASH_ID",
+    "🤖": "PREMIUM_EMOJI_ROBOT_ID", "🧪": "PREMIUM_EMOJI_TEST_TUBE_ID",
+    "🪪": "PREMIUM_EMOJI_ID_BADGE_ID", "🚷": "PREMIUM_EMOJI_NO_ENTRY_ID",
+    "🛠": "PREMIUM_EMOJI_TOOLS_ID", "🛡": "PREMIUM_EMOJI_SHIELD_ID",
+    "🛰": "PREMIUM_EMOJI_SATELLITE_ID", "🟢": "PREMIUM_EMOJI_GREEN_CIRCLE_ID",
+    "🆕": "PREMIUM_EMOJI_NEW_ID", "🧑‍💻": "PREMIUM_EMOJI_DEVELOPER_ID",
+}
+
+def _button_style(setting, fallback="primary"):
+    value = os.environ.get(setting, fallback).strip().lower()
+    return value if value in _BUTTON_STYLES else fallback
+
+def _button_emoji(setting):
+    value = os.environ.get(setting, "").strip()
+    if value.isdigit():
+        return value
+    return _EMOJI_ID_DEFAULTS.get(setting)
+
+def _menu_text(fallback_emoji, label, emoji_setting):
+    # The Telegram button icon replaces the Unicode fallback when configured.
+    return f"{label}" if _button_emoji(emoji_setting) else f"{fallback_emoji}  {label}"
+
+def _premium_emoji(fallback_emoji, setting):
+    emoji_id = _button_emoji(setting)
+    return f'<tg-emoji emoji-id="{emoji_id}">{fallback_emoji}</tg-emoji>' if emoji_id else fallback_emoji
+
+def _premiumize_html(text):
+    """Replace configured emoji in HTML message text, preserving existing tg-emoji tags."""
+    parts = re.split(r'(<tg-emoji\b[^>]*>.*?</tg-emoji>)', str(text), flags=re.I | re.S)
+    for index in range(0, len(parts), 2):
+        for emoji, setting in sorted(_PREMIUM_EMOJI_SETTINGS.items(), key=lambda item: len(item[0]), reverse=True):
+            emoji_id = _button_emoji(setting)
+            if emoji_id:
+                replacement = f'<tg-emoji emoji-id="{emoji_id}">{emoji}</tg-emoji>'
+                if emoji == "💻":
+                    parts[index] = re.sub(r'(?<!\u200d)💻', lambda _: replacement, parts[index])
+                else:
+                    parts[index] = parts[index].replace(emoji, replacement)
+    return "".join(parts)
+
+def InlineKeyboardButton(text, *args, **kwargs):
+    """Attach a configured Premium emoji as the icon of inline buttons that start with one."""
+    if "icon_custom_emoji_id" not in kwargs:
+        for emoji, setting in sorted(_PREMIUM_EMOJI_SETTINGS.items(), key=lambda item: len(item[0]), reverse=True):
+            if text.startswith(emoji) and (emoji_id := _button_emoji(setting)):
+                text = text[len(emoji):].lstrip()
+                kwargs["icon_custom_emoji_id"] = emoji_id
+                break
+    return _TelegramInlineKeyboardButton(text, *args, **kwargs)
+
+async def _reply_html(message, text, **kwargs):
+    return await message.reply_text(_premiumize_html(text), parse_mode=ParseMode.HTML, **kwargs)
+
+async def _reply_text(message, text, **kwargs):
+    updated = _premiumize_html(text)
+    if updated != text:
+        kwargs.setdefault("parse_mode", ParseMode.HTML)
+    return await message.reply_text(updated, **kwargs)
+
+def _menu_button(text, style_setting, emoji_setting, fallback_style="primary"):
+    return KeyboardButton(
+        text=text,
+        style=_button_style(style_setting, fallback_style),
+        icon_custom_emoji_id=_button_emoji(emoji_setting),
+    )
 
 # ══════════════════════════════════════════════════════
 #   RATE-LIMIT-SAFE  editMessageText  WRAPPER
@@ -36,6 +188,10 @@ async def safe_edit(msg, text, **kwargs):
     This wrapper sleeps for the server-mandated delay (plus a 0.5 s
     safety margin) and tries up to 3 times before giving up quietly.
     """
+    updated = _premiumize_html(text)
+    if updated != text:
+        text = updated
+        kwargs.setdefault("parse_mode", ParseMode.HTML)
     for attempt in range(3):
         try:
             await msg.edit_text(text, **kwargs)
@@ -129,19 +285,25 @@ def check_node_js():
 def channels_inline_kb(missing):
     rows = []
     for ch in missing:
-        icon = "🔐" if ch.get("type") == "private" else "📡"
-        rows.append([InlineKeyboardButton(f"{icon}  {ch.get('name','Channel')}", url=ch.get("link",""))])
+        is_private = ch.get("type") == "private"
+        icon = "🔐" if is_private else "📡"
+        emoji_id = _button_emoji("BUTTON_EMOJI_PRIVATE_CHANNEL" if is_private else "BUTTON_EMOJI_CHANNEL")
+        label = ch.get("name", "Channel")
+        if not emoji_id:
+            label = f"{icon}  {label}"
+        rows.append([InlineKeyboardButton(label, url=ch.get("link", ""), icon_custom_emoji_id=emoji_id)])
     return InlineKeyboardMarkup(rows)
 
 def joined_reply_kb():
     return ReplyKeyboardMarkup(
-        [["✅  𝗜'𝘃𝗲 𝗝𝗼𝗶𝗻𝗲𝗱 𝗔𝗹𝗹 𝗖𝗵𝗮𝗻𝗻𝗲𝗹𝘀"]],
+        [[_menu_button(_menu_text("✅", "𝗜'𝘃𝗲 𝗝𝗼𝗶𝗻𝗲𝗱 𝗔𝗹𝗹 𝗖𝗵𝗮𝗻𝗻𝗲𝗹𝘀", "BUTTON_EMOJI_JOINED"), "BUTTON_STYLE_JOINED", "BUTTON_EMOJI_JOINED", "success")]],
         resize_keyboard=True, one_time_keyboard=True
     )
 
 def main_kb():
     return ReplyKeyboardMarkup(
-        [["⚡  𝗛𝗧𝗠𝗟 𝗗𝗲𝗰𝗼𝗱𝗲𝗿",  "🧑‍💻  𝗗𝗲𝘃𝗲𝗹𝗼𝗽𝗲𝗿"]],
+        [[_menu_button(_menu_text("⚡", "𝗛𝗧𝗠𝗟 𝗗𝗲𝗰𝗼𝗱𝗲𝗿", "BUTTON_EMOJI_DECODE"), "BUTTON_STYLE_DECODE", "BUTTON_EMOJI_DECODE", "primary"),
+          _menu_button(_menu_text("🧑‍💻", "𝗗𝗲𝘃𝗲𝗹𝗼𝗽𝗲𝗿", "BUTTON_EMOJI_DEVELOPER"), "BUTTON_STYLE_DEVELOPER", "BUTTON_EMOJI_DEVELOPER", "success")]],
         resize_keyboard=True,
     )
 
@@ -151,21 +313,21 @@ def main_kb():
 async def send_welcome(bot, chat_id, first_name):
     txt = (
         "╔══════════════════════════════╗\n"
-        "  🧬  <b>𝗛𝗧𝗠𝗟  𝗗𝗘𝗖𝗢𝗗𝗘𝗥  𝗕𝗢𝗧</b>\n"
+        f"  {_premium_emoji('🧬', 'PREMIUM_EMOJI_BRAND_ID')}  <b>𝗛𝗧𝗠𝗟  𝗗𝗘𝗖𝗢𝗗𝗘𝗥  𝗕𝗢𝗧</b>\n"
         "╚══════════════════════════════╝\n\n"
-        f"👾  𝒲𝑒𝓁𝒸𝑜𝓂𝑒,  <b>{first_name}</b>!\n\n"
+        f"{_premium_emoji('👾', 'PREMIUM_EMOJI_ALIEN_ID')}  𝒲𝑒𝓁𝒸𝑜𝓂𝑒,  <b>{first_name}</b>!\n\n"
         "𝙸 𝚌𝚊𝚗 𝚒𝚗𝚜𝚝𝚊𝚗𝚝𝚕𝚢 𝚍𝚎𝚌𝚛𝚢𝚙𝚝 𝚊𝚗𝚢\n"
         "𝚎𝚗𝚌𝚛𝚢𝚙𝚝𝚎𝚍 <b>.html</b> 𝚏𝚒𝚕𝚎 𝚢𝚘𝚞 𝚜𝚎𝚗𝚍.\n\n"
         "━━━━━━━━━━━━━━━━━━\n"
-        "〔 ⚙️  <b>𝗗𝗲𝗰𝗿𝘆𝗽𝘁𝗶𝗼𝗻 𝗘𝗻𝗴𝗶𝗻𝗲𝘀</b> 〕\n\n"
-        "◈  ⚡ <b>𝗽𝗵𝗽𝗸𝗼𝗯𝗼</b>   ╌  𝖺𝗎𝗍𝗈-𝖽𝖾𝗍𝖾𝖼𝗍\n"
+        f"〔 {_premium_emoji('⚙️', 'PREMIUM_EMOJI_GEAR_ID')}  <b>𝗗𝗲𝗰𝗿𝘆𝗽𝘁𝗶𝗼𝗻 𝗘𝗻𝗴𝗶𝗻𝗲𝘀</b> 〕\n\n"
+        f"◈  {_premium_emoji('⚡', 'PREMIUM_EMOJI_LIGHTNING_ID')} <b>𝗽𝗵𝗽𝗸𝗼𝗯𝗼</b>   ╌  𝖺𝗎𝗍𝗈-𝖽𝖾𝗍𝖾𝖼𝗍\n"
         "◈  🧬 <b>𝗛𝗕 𝗘𝗡𝗖 𝗩𝟭</b>  ╌  𝖺𝗎𝗍𝗈-𝖽𝖾𝗍𝖾𝖼𝗍  🆕\n"
         "◈  🔓 <b>𝗥𝗗𝗫 𝘃𝟳.𝟭</b>  ╌  𝖺𝗎𝗍𝗈-𝖽𝖾𝗍𝖾𝖼𝗍  🆕\n"
-        "◈  🖥️ <b>𝗦𝗲𝗿𝘃𝗲𝗿</b>    ╌  𝚜𝚝𝚊𝚗𝚍𝚊𝚛𝚍 𝚎𝚗𝚌\n"
+        f"◈  {_premium_emoji('🖥️', 'PREMIUM_EMOJI_SERVER_ID')} <b>𝗦𝗲𝗿𝘃𝗲𝗿</b>    ╌  𝚜𝚝𝚊𝚗𝚍𝚊𝚛𝚍 𝚎𝚗𝚌\n"
         "━━━━━━━━━━━━━━━━━━\n\n"
         "🔻  𝚄𝚜𝚎 𝚝𝚑𝚎 𝚖𝚎𝚗𝚞 𝚋𝚎𝚕𝚘𝚠 𝚝𝚘 𝚜𝚝𝚊𝚛𝚝 ↓"
     )
-    await bot.send_message(chat_id, txt, parse_mode=ParseMode.HTML, reply_markup=main_kb())
+    await bot.send_message(chat_id, _premiumize_html(txt), parse_mode=ParseMode.HTML, reply_markup=main_kb())
 
 def ban_text(uid):
     return (
@@ -435,24 +597,24 @@ async def decode_rdx(in_path: str, out_path: str) -> str:
 #   INIT ANIMATION  — New Braille Spinner
 # ══════════════════════════════════════════════════════
 _INIT_FRAMES = [
-    "⠸  𝙸𝚗𝚒𝚝 𝙴𝚗𝚐𝚒𝚗𝚎𝚜...",
-    "⠦  𝚅𝚎𝚛𝚒𝚏𝚢𝚒𝚗𝚐...",
-    "✦  𝗔𝗟𝗟  𝗦𝗬𝗦𝗧𝗘𝗠𝗦  𝗚𝗢!",
+    "🔹  𝙸𝚗𝚒𝚝 𝙴𝚗𝚐𝚒𝚗𝚎𝚜  ▰▱▱",
+    "🔷  𝚅𝚎𝚛𝚒𝚏𝚢 𝙵𝚒𝚕𝚎  ▰▰▱",
+    "✅  𝗔𝗟𝗟  𝗦𝗬𝗦𝗧𝗘𝗠𝗦  𝗚𝗢!",
 ]
 
 async def _decode_start(update, context):
-    msg = await update.message.reply_text("⠿  𝙸𝚗𝚒𝚝𝚒𝚊𝚕𝚒𝚣𝚒𝚗𝚐...")
+    msg = await _reply_text(update.message, "⠿  𝙸𝚗𝚒𝚝𝚒𝚊𝚕𝚒𝚣𝚒𝚗𝚐...")
     for frame in _INIT_FRAMES:
-        await asyncio.sleep(3.0)
+        await asyncio.sleep(1.1)
         await safe_edit(msg, frame)
     await asyncio.sleep(0.5)
     try: await msg.delete()
     except: pass
 
     context.user_data["waiting_for_html"] = True
-    await update.message.reply_html(
+    await _reply_html(update.message, 
         "╔══════════════════════════╗\n"
-        "  🗂  <b>𝗦𝗲𝗻𝗱 𝗬𝗼𝘂𝗿 𝗙𝗶𝗹𝗲</b>\n"
+        f"  {_premium_emoji('🗂', 'PREMIUM_EMOJI_FOLDER_ID')}  <b>𝗦𝗲𝗻𝗱 𝗬𝗼𝘂𝗿 𝗙𝗶𝗹𝗲</b>\n"
         "╚══════════════════════════╝\n\n"
         "𝚂𝚎𝚗𝚍 𝚢𝚘𝚞𝚛 𝚎𝚗𝚌𝚛𝚢𝚙𝚝𝚎𝚍 <b>.html</b> 𝚏𝚒𝚕𝚎 ↓\n\n"
         "🔸  <b>𝗦𝘂𝗽𝗽𝗼𝗿𝘁𝗲𝗱:</b>  .html  ╌  .htm\n\n"
@@ -463,13 +625,13 @@ async def _decode_start(update, context):
 #   PHPKOBO  CHECKLIST  ANIMATION
 # ══════════════════════════════════════════════════════
 _PK = [
-    ("🔎", "𝙴𝚗𝚌𝚛𝚢𝚙𝚝 𝚃𝚢𝚙𝚎  ╌  𝗽𝗵𝗽𝗸𝗼𝗯𝗼"),
-    ("🔓", "𝙱𝚢𝚝𝚎𝚜 𝙳𝚎𝚌𝚛𝚢𝚙𝚝𝚎𝚍"),
-    ("💾", "𝙾𝚞𝚝𝚙𝚞𝚝 𝚂𝚊𝚟𝚎𝚍"),
+    (_premium_emoji("🔎", "PREMIUM_EMOJI_SEARCH_ID"), "𝙴𝚗𝚌𝚛𝚢𝚙𝚝 𝚃𝚢𝚙𝚎  ╌  𝗽𝗵𝗽𝗸𝗼𝗯𝗼"),
+    (_premium_emoji("🔓", "PREMIUM_EMOJI_UNLOCK_ID"), "𝙱𝚢𝚝𝚎𝚜 𝙳𝚎𝚌𝚛𝚢𝚙𝚝𝚎𝚍"),
+    (_premium_emoji("💾", "PREMIUM_EMOJI_SAVE_ID"), "𝙾𝚞𝚝𝚙𝚞𝚝 𝚂𝚊𝚟𝚎𝚍"),
 ]
 
 def _pk_msg(cur):
-    h = "⚡  <b>𝗣𝗛𝗣𝗞𝗢𝗕𝗢  𝗗𝗲𝗰𝗿𝘆𝗽𝘁  𝗘𝗻𝗴𝗶𝗻𝗲</b>\n\n"
+    h = f"{_premium_emoji('⚡', 'PREMIUM_EMOJI_LIGHTNING_ID')}  <b>𝗣𝗛𝗣𝗞𝗢𝗕𝗢  𝗗𝗲𝗰𝗿𝘆𝗽𝘁  𝗘𝗻𝗴𝗶𝗻𝗲</b>\n\n"
     lines = []
     for i, (icon, label) in enumerate(_PK):
         if i < cur:    lines.append(f"  ✦  {icon}  {label}")
@@ -481,13 +643,13 @@ def _pk_msg(cur):
 #   RDX v7.1  CHECKLIST  ANIMATION  (NEW)
 # ══════════════════════════════════════════════════════
 _RDX = [
-    ("🔍", "𝙴𝚗𝚌𝚛𝚢𝚙𝚝 𝚃𝚢𝚙𝚎  ╌  𝗥𝗗𝗫 𝘃𝟳.𝟭"),
-    ("🔑", "𝙻𝚊𝚢𝚎𝚛 𝙳𝚎𝚌𝚘𝚍𝚒𝚗𝚐"),
-    ("💾", "𝙾𝚞𝚝𝚙𝚞𝚝 𝚂𝚊𝚟𝚎𝚍"),
+    (_premium_emoji("🔍", "PREMIUM_EMOJI_RDX_SEARCH_ID"), "𝙴𝚗𝚌𝚛𝚢𝚙𝚝 𝚃𝚢𝚙𝚎  ╌  𝗥𝗗𝗫 𝘃𝟳.𝟭"),
+    (_premium_emoji("🔑", "PREMIUM_EMOJI_KEY_ID"), "𝙻𝚊𝚢𝚎𝚛 𝙳𝚎𝚌𝚘𝚍𝚒𝚗𝚐"),
+    (_premium_emoji("💾", "PREMIUM_EMOJI_SAVE_ID"), "𝙾𝚞𝚝𝚙𝚞𝚝 𝚂𝚊𝚟𝚎𝚍"),
 ]
 
 def _rdx_msg(cur):
-    h = "🔓  <b>𝗥𝗗𝗫  𝗗𝗲𝗰𝗿𝘆𝗽𝘁  𝗘𝗻𝗴𝗶𝗻𝗲  𝘃𝟳.𝟭</b>\n\n"
+    h = f"{_premium_emoji('🔓', 'PREMIUM_EMOJI_UNLOCK_ID')}  <b>𝗥𝗗𝗫  𝗗𝗲𝗰𝗿𝘆𝗽𝘁  𝗘𝗻𝗴𝗶𝗻𝗲  𝘃𝟳.𝟭</b>\n\n"
     lines = []
     for i, (icon, label) in enumerate(_RDX):
         if i < cur:    lines.append(f"  ✦  {icon}  {label}")
@@ -509,7 +671,7 @@ def _br_msg(idx):
     filled = int(pct / 10)
     bar    = "█" * filled + "░" * (10 - filled)
     return (
-        f"🖥️  <b>𝗦𝗲𝗿𝘃𝗲𝗿  𝗥𝗲𝗻𝗱𝗲𝗿  𝗘𝗻𝗴𝗶𝗻𝗲</b>\n\n"
+        f"{_premium_emoji('🖥️', 'PREMIUM_EMOJI_SERVER_ID')}  <b>𝗦𝗲𝗿𝘃𝗲𝗿  𝗥𝗲𝗻𝗱𝗲𝗿  𝗘𝗻𝗴𝗶𝗻𝗲</b>\n\n"
         f"  [{bar}]  {pct}%\n\n"
         f"  🔹  {label}"
     )
@@ -518,8 +680,8 @@ def _br_msg(idx):
 #   DECODE  STEP 2 — PROCESS  (Auto-Detect: PK → RDX → Server)
 # ══════════════════════════════════════════════════════
 async def _do_decode(update, context, doc, fname):
-    msg = await update.message.reply_text("🛰️  𝙴𝚜𝚝𝚊𝚋𝚕𝚒𝚜𝚑𝚒𝚗𝚐 𝚌𝚘𝚗𝚗𝚎𝚌𝚝𝚒𝚘𝚗...")
-    await asyncio.sleep(3.0)
+    msg = await _reply_text(update.message, "🛰️  𝙴𝚜𝚝𝚊𝚋𝚕𝚒𝚜𝚑𝚒𝚗𝚐 𝚌𝚘𝚗𝚗𝚎𝚌𝚝𝚒𝚘𝚗...")
+    await asyncio.sleep(1.1)
     await safe_edit(msg, "🧪  𝙰𝚗𝚊𝚕𝚢𝚣𝚒𝚗𝚐 𝚎𝚗𝚌𝚛𝚢𝚙𝚝𝚒𝚘𝚗...")
 
     try:
@@ -541,18 +703,18 @@ async def _do_decode(update, context, doc, fname):
             if detect_phpkobo(raw):
                 for step in range(len(_PK)):
                     await safe_edit(msg, _pk_msg(step), parse_mode=ParseMode.HTML)
-                    await asyncio.sleep(3.0)
+                    await asyncio.sleep(1.1)
                 decoded = decode_phpkobo(raw)
-                method  = "⚡  𝗽𝗵𝗽𝗸𝗼𝗯𝗼 𝙴𝚗𝚐𝚒𝚗𝚎"
+                method  = f"{_premium_emoji('⚡', 'PREMIUM_EMOJI_LIGHTNING_ID')}  𝗽𝗵𝗽𝗸𝗼𝗯𝗼 𝙴𝚗𝚐𝚒𝚗𝚎"
                 with open(out_path, "w", encoding="utf-8") as f: f.write(decoded)
-                await safe_edit(msg, "📸  𝙲𝚊𝚙𝚝𝚞𝚛𝚒𝚗𝚐 𝚜𝚌𝚛𝚎𝚎𝚗𝚜𝚑𝚘𝚝...")
+                await safe_edit(msg, f"{_premium_emoji('📸', 'PREMIUM_EMOJI_CAMERA_ID')}  𝙲𝚊𝚙𝚝𝚞𝚛𝚒𝚗𝚐 𝚜𝚌𝚛𝚎𝚎𝚗𝚜𝚑𝚘𝚝...", parse_mode=ParseMode.HTML)
                 screenshot = await take_screenshot(out_path)
                 db["stats"]["phpkobo"] = db["stats"].get("phpkobo", 0) + 1
 
             # ── ENGINE 2: HB ENC V1 ────────────────────────────────
             elif detect_custom_cipher(raw):
                 await safe_edit(msg, "🧬  𝗛𝗕 𝗘𝗡𝗖 𝗩𝟭 𝙳𝚎𝚝𝚎𝚌𝚝𝚎𝚍...")
-                await asyncio.sleep(3.0)
+                await asyncio.sleep(1.1)
                 decoded = decode_custom_cipher(raw)
                 method = "🧬  𝗛𝗕 𝗘𝗡𝗖 𝗩𝟭 𝙴𝚗𝚐𝚒𝚗𝚎"
                 with open(out_path, "w", encoding="utf-8") as f: f.write(decoded)
@@ -576,7 +738,7 @@ async def _do_decode(update, context, doc, fname):
                     # screenshot/rendering failure must not re-run the
                     # encrypted input through the Server engine.
                     decoded    = await rdx_task
-                    method     = "🔓  𝗥𝗗𝗫 𝘃𝟳.𝟭 𝙴𝚗𝚐𝚒𝚗𝚎"
+                method     = f"{_premium_emoji('🔓', 'PREMIUM_EMOJI_UNLOCK_ID')}  𝗥𝗗𝗫 𝘃𝟳.𝟭 𝙴𝚗𝚐𝚒𝚗𝚎"
                     with open(out_path, "w", encoding="utf-8") as f:
                         f.write(decoded)
                     db["stats"]["rdx"] = db["stats"].get("rdx", 0) + 1
@@ -596,7 +758,7 @@ async def _do_decode(update, context, doc, fname):
                     with open(out_path, "w", encoding="utf-8") as f: f.write(decoded)
                     db["stats"]["server"] = db["stats"].get("server", 0) + 1
                 else:
-                    await safe_edit(msg, "📸  𝙲𝚊𝚙𝚝𝚞𝚛𝚒𝚗𝚐 𝚜𝚌𝚛𝚎𝚎𝚗𝚜𝚑𝚘𝚝...")
+                    await safe_edit(msg, f"{_premium_emoji('📸', 'PREMIUM_EMOJI_CAMERA_ID')}  𝙲𝚊𝚙𝚝𝚞𝚛𝚒𝚗𝚐 𝚜𝚌𝚛𝚎𝚎𝚗𝚜𝚑𝚘𝚝...", parse_mode=ParseMode.HTML)
                     screenshot = await take_screenshot(out_path)
 
             # ── ENGINE 4: Server / Browser ─────────────────────────
@@ -622,24 +784,24 @@ async def _do_decode(update, context, doc, fname):
             import io
             await update.message.reply_photo(
                 photo=io.BytesIO(screenshot),
-                caption=(
-                    f"🖼  <b>𝗣𝗮𝗴𝗲 𝗦𝗰𝗿𝗲𝗲𝗻𝘀𝗵𝗼𝘁</b>\n\n"
-                    f"⚙️  <b>𝗠𝗲𝘁𝗵𝗼𝗱</b>  ╌  {method}\n"
-                    "📎  𝙵𝚒𝚕𝚎 𝚜𝚎𝚗𝚍𝚒𝚗𝚐 𝚋𝚎𝚕𝚘𝚠 ↓"
-                ),
+            caption=_premiumize_html((
+                    f"{_premium_emoji('🖼️', 'PREMIUM_EMOJI_IMAGE_ID')}  <b>𝗣𝗮𝗴𝗲 𝗦𝗰𝗿𝗲𝗲𝗻𝘀𝗵𝗼𝘁</b>\n\n"
+                    f"{_premium_emoji('⚙️', 'PREMIUM_EMOJI_GEAR_ID')}  <b>𝗠𝗲𝘁𝗵𝗼𝗱</b>  ╌  {method}\n"
+                    f"{_premium_emoji('📎', 'PREMIUM_EMOJI_ATTACHMENT_ID')}  𝙵𝚒𝚕𝚎 𝚜𝚎𝚗𝚍𝚒𝚗𝚐 𝚋𝚎𝚕𝚘𝚠 ↓"
+            )),
                 parse_mode=ParseMode.HTML,
             )
 
             with open(out_path, "rb") as f:
                 await update.message.reply_document(
                     document=f, filename=out_name,
-                    caption=(
+                    caption=_premiumize_html((
                         "╔══════════════════════════╗\n"
-                        "  ✅  <b>𝗗𝗲𝗰𝗼𝗱𝗲 𝗦𝘂𝗰𝗰𝗲𝘀𝘀𝗳𝘂𝗹!</b>\n"
+                        f"  {_premium_emoji('✅', 'PREMIUM_EMOJI_CHECK_ID')}  <b>𝗗𝗲𝗰𝗼𝗱𝗲 𝗦𝘂𝗰𝗰𝗲𝘀𝘀𝗳𝘂𝗹!</b>\n"
                         "╚══════════════════════════╝\n\n"
-                        f"🗂  <b>𝗙𝗶𝗹𝗲</b>    ╌  <code>{out_name}</code>\n"
-                        f"⚙️  <b>𝗠𝗲𝘁𝗵𝗼𝗱</b>  ╌  {method}"
-                    ),
+                        f"{_premium_emoji('🗂', 'PREMIUM_EMOJI_FOLDER_ID')}  <b>𝗙𝗶𝗹𝗲</b>    ╌  <code>{out_name}</code>\n"
+                        f"{_premium_emoji('⚙️', 'PREMIUM_EMOJI_GEAR_ID')}  <b>𝗠𝗲𝘁𝗵𝗼𝗱</b>  ╌  {method}"
+                    )),
                     parse_mode=ParseMode.HTML,
                 )
             try: await msg.delete()
@@ -661,7 +823,7 @@ async def _do_decode(update, context, doc, fname):
 async def _dev_info(update, context):
     txt = (
         "╔══════════════════════════╗\n"
-        "  🧑‍💻  <b>𝗗𝗲𝘃𝗲𝗹𝗼𝗽𝗲𝗿 𝗣𝗿𝗼𝗳𝗶𝗹𝗲</b>\n"
+        f"  {_premium_emoji('🧑‍💻', 'PREMIUM_EMOJI_DEVELOPER_ID')}  <b>𝗗𝗲𝘃𝗲𝗹𝗼𝗽𝗲𝗿 𝗣𝗿𝗼𝗳𝗶𝗹𝗲</b>\n"
         "╚══════════════════════════╝\n\n"
         "🏷  <b>𝗡𝗮𝗺𝗲</b>   ╌  𝘽𝘿 𝘼𝙇𝘼𝙈𝙄𝙉\n\n"
         "🎯  <b>𝗗𝗿𝗲𝗮𝗺</b>  ╌  𝙃𝙖𝙘𝙠𝙞𝙣𝙜  ♦  𝙏𝙧𝙖𝙙𝙞𝙣𝙜  ♦  𝙈𝙤𝙣𝙚𝙮\n\n"
@@ -676,9 +838,11 @@ async def _dev_info(update, context):
     )
     kb = InlineKeyboardMarkup([[
         InlineKeyboardButton("💬  𝗖𝗼𝗻𝘁𝗮𝗰𝘁 𝗗𝗲𝘃𝗲𝗹𝗼𝗽𝗲𝗿",
-                             url=f"https://t.me/{OWNER_USERNAME}")
+                             url=f"https://t.me/{OWNER_USERNAME}",
+                             style=_button_style("BUTTON_STYLE_CONTACT", "primary"),
+                             icon_custom_emoji_id=_button_emoji("BUTTON_EMOJI_CONTACT"))
     ]])
-    await update.message.reply_html(txt, reply_markup=kb)
+    await _reply_html(update.message, txt, reply_markup=kb)
 
 # ══════════════════════════════════════════════════════
 #   BOT STATISTICS  — New Design
@@ -691,22 +855,22 @@ async def _bot_status(update, context):
     srv  = db["stats"].get("server", 0)
     txt  = (
         "╔══════════════════════════╗\n"
-        "  📊  <b>𝗕𝗼𝘁 𝗦𝘁𝗮𝘁𝗶𝘀𝘁𝗶𝗰𝘀</b>\n"
+        f"  {_premium_emoji('📊', 'PREMIUM_EMOJI_STATS_ID')}  <b>𝗕𝗼𝘁 𝗦𝘁𝗮𝘁𝗶𝘀𝘁𝗶𝗰𝘀</b>\n"
         "╚══════════════════════════╝\n\n"
-        f"👥  <b>𝗧𝗼𝘁𝗮𝗹 𝗨𝘀𝗲𝗿𝘀</b>     ╌  <b>{len(db['users'])}</b>\n\n"
-        f"⚡  <b>𝗗𝗲𝗰𝗼𝗱𝗲𝘀 𝗗𝗼𝗻𝗲</b>   ╌  <b>{db['stats'].get('total_decodes',0)}</b>\n\n"
+        f"{_premium_emoji('👥', 'PREMIUM_EMOJI_USERS_ID')}  <b>𝗧𝗼𝘁𝗮𝗹 𝗨𝘀𝗲𝗿𝘀</b>     ╌  <b>{len(db['users'])}</b>\n\n"
+        f"{_premium_emoji('⚡', 'PREMIUM_EMOJI_LIGHTNING_ID')}  <b>𝗗𝗲𝗰𝗼𝗱𝗲𝘀 𝗗𝗼𝗻𝗲</b>   ╌  <b>{db['stats'].get('total_decodes',0)}</b>\n\n"
         "━━━━━━━━━━━━━━━━━━\n"
         "〔 𝗘𝗻𝗴𝗶𝗻𝗲 𝗕𝗿𝗲𝗮𝗸𝗱𝗼𝘄𝗻 〕\n\n"
-        f"⚡  <b>𝗽𝗵𝗽𝗸𝗼𝗯𝗼</b>  ╌  <b>{pk}</b>\n"
-        f"🔓  <b>𝗥𝗗𝗫 𝘃𝟳.𝟭</b>  ╌  <b>{rdx}</b>\n"
-        f"🖥️  <b>𝗦𝗲𝗿𝘃𝗲𝗿</b>    ╌  <b>{srv}</b>\n\n"
+        f"{_premium_emoji('⚡', 'PREMIUM_EMOJI_LIGHTNING_ID')}  <b>𝗽𝗵𝗽𝗸𝗼𝗯𝗼</b>  ╌  <b>{pk}</b>\n"
+        f"{_premium_emoji('🔓', 'PREMIUM_EMOJI_UNLOCK_ID')}  <b>𝗥𝗗𝗫 𝘃𝟳.𝟭</b>  ╌  <b>{rdx}</b>\n"
+        f"{_premium_emoji('🖥️', 'PREMIUM_EMOJI_SERVER_ID')}  <b>𝗦𝗲𝗿𝘃𝗲𝗿</b>    ╌  <b>{srv}</b>\n\n"
         "━━━━━━━━━━━━━━━━━━\n"
-        f"📡  <b>𝗣𝘂𝗯 𝗖𝗵𝗮𝗻𝗻𝗲𝗹𝘀</b>   ╌  <b>{pub}</b>\n\n"
+        f"{_premium_emoji('📡', 'PREMIUM_EMOJI_RADAR_ID')}  <b>𝗣𝘂𝗯 𝗖𝗵𝗮𝗻𝗻𝗲𝗹𝘀</b>   ╌  <b>{pub}</b>\n\n"
         f"🔐  <b>𝗣𝗿𝗶𝘃 𝗖𝗵𝗮𝗻𝗻𝗲𝗹𝘀</b>  ╌  <b>{priv}</b>\n\n"
         "━━━━━━━━━━━━━━━━━━\n"
         "🖤  𝙸 𝚕𝚘𝚟𝚎 𝚖𝚢 𝚞𝚜𝚎𝚛𝚜 — 𝚒𝚝'𝚜 𝚏𝚛𝚎𝚎."
     )
-    await update.message.reply_html(txt)
+    await _reply_html(update.message, txt)
 
 # ══════════════════════════════════════════════════════
 #   ADMIN PANEL
@@ -721,10 +885,10 @@ def _panel_text():
         "╚══════════════════════════╝\n\n"
         f"🤖  <b>𝗦𝘁𝗮𝘁𝘂𝘀</b>    ╌  {st}\n"
         f"👥  <b>𝗨𝘀𝗲𝗿𝘀</b>     ╌  <b>{len(db['users'])}</b>\n"
-        f"📡  <b>𝗣𝘂𝗯 𝗖𝗵</b>   ╌  <b>{pub}</b>\n"
+        f"{_premium_emoji('📡', 'PREMIUM_EMOJI_RADAR_ID')}  <b>𝗣𝘂𝗯 𝗖𝗵</b>   ╌  <b>{pub}</b>\n"
         f"🔐  <b>𝗣𝗿𝗶𝘃 𝗖𝗵</b>  ╌  <b>{priv}</b>\n"
         f"🛡  <b>𝗔𝗱𝗺𝗶𝗻𝘀</b>   ╌  <b>{len(db['admins'])}</b>\n"
-        f"⚡  <b>𝗗𝗲𝗰𝗼𝗱𝗲𝘀</b>  ╌  <b>{db['stats'].get('total_decodes',0)}</b>"
+        f"{_premium_emoji('⚡', 'PREMIUM_EMOJI_LIGHTNING_ID')}  <b>𝗗𝗲𝗰𝗼𝗱𝗲𝘀</b>  ╌  <b>{db['stats'].get('total_decodes',0)}</b>"
     )
 
 def _panel_kb():
@@ -740,7 +904,7 @@ def _panel_kb():
     ])
 
 async def _show_admin_panel(update, context):
-    await update.message.reply_html(_panel_text(), reply_markup=_panel_kb())
+    await _reply_html(update.message, _panel_text(), reply_markup=_panel_kb())
 
 # ══════════════════════════════════════════════════════
 #   COMMAND HANDLERS
@@ -749,21 +913,21 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     register_user(user)
     if not bot_active() and not is_admin(user.id):
-        await update.message.reply_text("🔴  𝗕𝗼𝘁 𝗶𝘀 𝗼𝗳𝗳𝗹𝗶𝗻𝗲.  𝙿𝚕𝚎𝚊𝚜𝚎 𝚝𝚛𝚢 𝚊𝚐𝚊𝚒𝚗 𝚕𝚊𝚝𝚎𝚛."); return
+        await _reply_text(update.message, "🔴  𝗕𝗼𝘁 𝗶𝘀 𝗼𝗳𝗳𝗹𝗶𝗻𝗲.  𝙿𝚕𝚎𝚊𝚜𝚎 𝚝𝚛𝚢 𝚊𝚐𝚊𝚒𝚗 𝚕𝚊𝚝𝚎𝚛."); return
     if is_banned(user.id):
-        await update.message.reply_html(ban_text(user.id)); return
+        await _reply_html(update.message, ban_text(user.id)); return
     joined, missing = await check_channels(context.bot, user.id)
     if not joined:
         n = len(missing)
-        await update.message.reply_html(
+        await _reply_html(update.message, 
             "╔══════════════════════════╗\n"
-            "  📡  <b>𝗖𝗵𝗮𝗻𝗻𝗲𝗹 𝗩𝗲𝗿𝗶𝗳𝗶𝗰𝗮𝘁𝗶𝗼𝗻</b>\n"
+            f"  {_premium_emoji('📡', 'PREMIUM_EMOJI_RADAR_ID')}  <b>𝗖𝗵𝗮𝗻𝗻𝗲𝗹 𝗩𝗲𝗿𝗶𝗳𝗶𝗰𝗮𝘁𝗶𝗼𝗻</b>\n"
             "╚══════════════════════════╝\n\n"
             f"𝙹𝚘𝚒𝚗 <b>{n}</b> 𝚌𝚑𝚊𝚗𝚗𝚎𝚕{'𝚜' if n>1 else ''} 𝚝𝚘 𝚞𝚜𝚎 𝚝𝚑𝚒𝚜 𝚋𝚘𝚝.\n\n"
             "𝚃𝚊𝚙 𝚋𝚎𝚕𝚘𝚠 𝚝𝚘 𝚓𝚘𝚒𝚗, 𝚝𝚑𝚎𝚗 𝚙𝚛𝚎𝚜𝚜 𝚝𝚑𝚎 𝚋𝚞𝚝𝚝𝚘𝚗 ↓",
             reply_markup=joined_reply_kb(),
         )
-        await update.message.reply_text("🗂  𝗖𝗵𝗮𝗻𝗻𝗲𝗹𝘀 𝘁𝗼 𝗝𝗼𝗶𝗻:", reply_markup=channels_inline_kb(missing))
+        await _reply_text(update.message, f"{_premium_emoji('🗂', 'PREMIUM_EMOJI_FOLDER_ID')}  𝗖𝗵𝗮𝗻𝗻𝗲𝗹𝘀 𝘁𝗼 𝗝𝗼𝗶𝗻:", parse_mode=ParseMode.HTML, reply_markup=channels_inline_kb(missing))
         return
     await send_welcome(context.bot, user.id, user.first_name)
 
@@ -779,12 +943,12 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not bot_active() and not is_admin(user.id): return
     if is_banned(user.id): return
     if not context.user_data.get("waiting_for_html"):
-        await update.message.reply_html(
-            "⚠️  𝙿𝚛𝚎𝚜𝚜  <b>⚡ 𝗛𝗧𝗠𝗟 𝗗𝗲𝗰𝗼𝗱𝗲𝗿</b>  𝚏𝚒𝚛𝚜𝚝.", reply_markup=main_kb()); return
+        await _reply_html(update.message, 
+            f"⚠️  𝙿𝚛𝚎𝚜𝚜  <b>{_premium_emoji('⚡', 'PREMIUM_EMOJI_LIGHTNING_ID')} 𝗛𝗧𝗠𝗟 𝗗𝗲𝗰𝗼𝗱𝗲𝗿</b>  𝚏𝚒𝚛𝚜𝚝.", reply_markup=main_kb()); return
     doc   = update.message.document
     fname = doc.file_name or "file.html"
     if not (fname.lower().endswith(".html") or fname.lower().endswith(".htm")):
-        await update.message.reply_html("⚠️  𝙾𝚗𝚕𝚢 <b>.html</b> / <b>.htm</b> 𝚏𝚒𝚕𝚎𝚜 𝚜𝚞𝚙𝚙𝚘𝚛𝚝𝚎𝚍."); return
+        await _reply_html(update.message, "⚠️  𝙾𝚗𝚕𝚢 <b>.html</b> / <b>.htm</b> 𝚏𝚒𝚕𝚎𝚜 𝚜𝚞𝚙𝚙𝚘𝚛𝚝𝚎𝚍."); return
     context.user_data["waiting_for_html"] = False
     await _do_decode(update, context, doc, fname)
 
@@ -794,7 +958,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if text == "#000000":
         if is_admin(user.id): await _show_admin_panel(update, context)
-        else: await update.message.reply_text("❌  𝗔𝗰𝗰𝗲𝘀𝘀 𝗗𝗲𝗻𝗶𝗲𝗱.")
+        else: await _reply_text(update.message, "❌  𝗔𝗰𝗰𝗲𝘀𝘀 𝗗𝗲𝗻𝗶𝗲𝗱.")
         return
 
     action = context.user_data.get("admin_action")
@@ -802,10 +966,10 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await _process_admin_input(update, context, action, text); return
 
     if not bot_active() and not is_admin(user.id):
-        await update.message.reply_text("🔴  𝗕𝗼𝘁 𝗶𝘀 𝗼𝗳𝗳𝗹𝗶𝗻𝗲."); return
+        await _reply_text(update.message, "🔴  𝗕𝗼𝘁 𝗶𝘀 𝗼𝗳𝗳𝗹𝗶𝗻𝗲."); return
     if is_banned(user.id): return
     if context.user_data.get("waiting_for_html"):
-        await update.message.reply_text("🗂  𝙿𝚕𝚎𝚊𝚜𝚎 𝚜𝚎𝚗𝚍 𝚊 .𝚑𝚝𝚖𝚕 𝚏𝚒𝚕𝚎."); return
+        await _reply_text(update.message, f"{_premium_emoji('🗂', 'PREMIUM_EMOJI_FOLDER_ID')}  𝙿𝚕𝚎𝚊𝚜𝚎 𝚜𝚎𝚗𝚍 𝚊 .𝚑𝚝𝚖𝚕 𝚏𝚒𝚕𝚎.", parse_mode=ParseMode.HTML); return
 
     if "𝗜'𝘃𝗲 𝗝𝗼𝗶𝗻𝗲𝗱" in text or "Joined" in text:
         rec = db["users"].setdefault(user.id, {"username":"","name":"","joined":"","banned":False,"private_acked":[]})
@@ -817,32 +981,32 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         joined, missing = await check_channels(context.bot, user.id)
         if not joined:
             n = len(missing)
-            await update.message.reply_html(
+            await _reply_html(update.message, 
                 f"⚠️  <b>𝗡𝗼𝘁 𝗬𝗲𝘁!</b>  𝚂𝚝𝚒𝚕𝚕 <b>{n}</b> 𝚌𝚑𝚊𝚗𝚗𝚎𝚕{'𝚜' if n>1 else ''} 𝚙𝚎𝚗𝚍𝚒𝚗𝚐 ↓",
                 reply_markup=joined_reply_kb())
-            await update.message.reply_text("🗂  𝗣𝗲𝗻𝗱𝗶𝗻𝗴 𝗖𝗵𝗮𝗻𝗻𝗲𝗹𝘀:", reply_markup=channels_inline_kb(missing))
+            await _reply_text(update.message, f"{_premium_emoji('🗂', 'PREMIUM_EMOJI_FOLDER_ID')}  𝗣𝗲𝗻𝗱𝗶𝗻𝗴 𝗖𝗵𝗮𝗻𝗻𝗲𝗹𝘀:", parse_mode=ParseMode.HTML, reply_markup=channels_inline_kb(missing))
             return
-        if is_banned(user.id): await update.message.reply_html(ban_text(user.id)); return
+        if is_banned(user.id): await _reply_html(update.message, ban_text(user.id)); return
         await send_welcome(context.bot, user.id, user.first_name); return
 
     if "𝗛𝗧𝗠𝗟 𝗗𝗲𝗰𝗼𝗱𝗲𝗿" in text or "Decode" in text:
         joined, missing = await check_channels(context.bot, user.id)
         if not joined:
             n = len(missing)
-            await update.message.reply_html(
-                f"📡  <b>𝗝𝗼𝗶𝗻 𝗥𝗲𝗾𝘂𝗶𝗿𝗲𝗱</b>  ╌  𝙹𝚘𝚒𝚗 <b>{n}</b> 𝚌𝚑𝚊𝚗𝚗𝚎𝚕{'𝚜' if n>1 else ''} 𝚏𝚒𝚛𝚜𝚝 ↓",
+            await _reply_html(update.message, 
+                f"{_premium_emoji('📡', 'PREMIUM_EMOJI_RADAR_ID')}  <b>𝗝𝗼𝗶𝗻 𝗥𝗲𝗾𝘂𝗶𝗿𝗲𝗱</b>  ╌  𝙹𝚘𝚒𝚗 <b>{n}</b> 𝚌𝚑𝚊𝚗𝚗𝚎𝚕{'𝚜' if n>1 else ''} 𝚏𝚒𝚛𝚜𝚝 ↓",
                 reply_markup=joined_reply_kb())
-            await update.message.reply_text("🗂  𝗖𝗵𝗮𝗻𝗻𝗲𝗹𝘀:", reply_markup=channels_inline_kb(missing)); return
+            await _reply_text(update.message, f"{_premium_emoji('🗂', 'PREMIUM_EMOJI_FOLDER_ID')}  𝗖𝗵𝗮𝗻𝗻𝗲𝗹𝘀:", parse_mode=ParseMode.HTML, reply_markup=channels_inline_kb(missing)); return
         await _decode_start(update, context)
 
     elif "𝗗𝗲𝘃𝗲𝗹𝗼𝗽𝗲𝗿" in text or "Developer" in text:
         joined, missing = await check_channels(context.bot, user.id)
         if not joined:
             n = len(missing)
-            await update.message.reply_html(
-                f"📡  <b>𝗝𝗼𝗶𝗻 𝗥𝗲𝗾𝘂𝗶𝗿𝗲𝗱</b>  ╌  𝙹𝚘𝚒𝚗 <b>{n}</b> 𝚌𝚑𝚊𝚗𝚗𝚎𝚕{'𝚜' if n>1 else ''} 𝚏𝚒𝚛𝚜𝚝 ↓",
+            await _reply_html(update.message, 
+                f"{_premium_emoji('📡', 'PREMIUM_EMOJI_RADAR_ID')}  <b>𝗝𝗼𝗶𝗻 𝗥𝗲𝗾𝘂𝗶𝗿𝗲𝗱</b>  ╌  𝙹𝚘𝚒𝚗 <b>{n}</b> 𝚌𝚑𝚊𝚗𝚗𝚎𝚕{'𝚜' if n>1 else ''} 𝚏𝚒𝚛𝚜𝚝 ↓",
                 reply_markup=joined_reply_kb())
-            await update.message.reply_text("🗂  𝗖𝗵𝗮𝗻𝗻𝗲𝗹𝘀:", reply_markup=channels_inline_kb(missing)); return
+            await _reply_text(update.message, f"{_premium_emoji('🗂', 'PREMIUM_EMOJI_FOLDER_ID')}  𝗖𝗵𝗮𝗻𝗻𝗲𝗹𝘀:", parse_mode=ParseMode.HTML, reply_markup=channels_inline_kb(missing)); return
         await _dev_info(update, context)
 
     # Statistics hidden from users — accessible via admin panel only
@@ -853,7 +1017,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def _admin_cb(update, context, data):
     q = update.callback_query
     async def edit(txt, kb=None):
-        try: await q.message.edit_text(txt, parse_mode=ParseMode.HTML, reply_markup=kb)
+        try: await q.message.edit_text(_premiumize_html(txt), parse_mode=ParseMode.HTML, reply_markup=kb)
         except: pass
 
     if data == "admin_back": await edit(_panel_text(), _panel_kb())
@@ -872,9 +1036,10 @@ async def _admin_cb(update, context, data):
         except Exception as e: await q.answer(f"❌ {e}", show_alert=True)
 
     elif data == "admin_channels":
-        txt = "╔══════════════════════╗\n  📡  <b>𝗖𝗵𝗮𝗻𝗻𝗲𝗹 𝗟𝗶𝘀𝘁</b>\n╚══════════════════════╝\n\n"
+        txt = f"╔══════════════════════╗\n  {_premium_emoji('📡', 'PREMIUM_EMOJI_RADAR_ID')}  <b>𝗖𝗵𝗮𝗻𝗻𝗲𝗹 𝗟𝗶𝘀𝘁</b>\n╚══════════════════════╝\n\n"
         for i,ch in enumerate(db["channels"],1):
-            icon = "📡" if ch.get("type","public")=="public" else "🔐"
+            is_public = ch.get("type", "public") == "public"
+            icon = _premium_emoji("📡", "PREMIUM_EMOJI_RADAR_ID") if is_public else _premium_emoji("🔐", "PREMIUM_EMOJI_LOCK_ID")
             lbl  = "𝗣𝘂𝗯𝗹𝗶𝗰" if ch.get("type","public")=="public" else "𝗣𝗿𝗶𝘃𝗮𝘁𝗲"
             txt += f"  {i}.  {icon}  <b>{ch.get('name','?')}</b>  ╌  {lbl}\n"
         if not db["channels"]: txt += "  𝙽𝚘 𝚌𝚑𝚊𝚗𝚗𝚎𝚕𝚜 𝚊𝚍𝚍𝚎𝚍 𝚢𝚎𝚝."
@@ -980,73 +1145,73 @@ async def _process_admin_input(update, context, action, text):
                 link = f"https://t.me/{chat.username}" if chat.username else f"https://t.me/c/{str(chat.id).lstrip('-100')}"
                 ch   = {"id":chat.id,"name":chat.title or str(chat.id),"type":"public","link":link,"username":f"@{chat.username}" if chat.username else ""}
                 if chat.id in [c["id"] for c in db["channels"]]:
-                    await update.message.reply_text("⚠️  𝙲𝚑𝚊𝚗𝚗𝚎𝚕 𝚊𝚕𝚛𝚎𝚊𝚍𝚢 𝚒𝚗 𝚕𝚒𝚜𝚝!")
+                    await _reply_text(update.message, "⚠️  𝙲𝚑𝚊𝚗𝚗𝚎𝚕 𝚊𝚕𝚛𝚎𝚊𝚍𝚢 𝚒𝚗 𝚕𝚒𝚜𝚝!")
                 else:
                     db["channels"].append(ch); save_db(db)
-                    await update.message.reply_html(f"✅  <b>{chat.title}</b> 𝚊𝚍𝚍𝚎𝚍!\n📋  𝗜𝗗  ╌  <code>{chat.id}</code>\n🔗  {link}")
-            except: await update.message.reply_html("❌  𝙲𝚑𝚊𝚗𝚗𝚎𝚕 𝚗𝚘𝚝 𝚏𝚘𝚞𝚗𝚍. 𝙼𝚊𝚔𝚎 𝚜𝚞𝚛𝚎 𝚋𝚘𝚝 𝚒𝚜 𝚊𝚗 𝙰𝚍𝚖𝚒𝚗.")
+                    await _reply_html(update.message, f"✅  <b>{chat.title}</b> 𝚊𝚍𝚍𝚎𝚍!\n{_premium_emoji('📋', 'PREMIUM_EMOJI_CLIPBOARD_ID')}  𝗜𝗗  ╌  <code>{chat.id}</code>\n🔗  {link}")
+            except: await _reply_html(update.message, "❌  𝙲𝚑𝚊𝚗𝚗𝚎𝚕 𝚗𝚘𝚝 𝚏𝚘𝚞𝚗𝚍. 𝙼𝚊𝚔𝚎 𝚜𝚞𝚛𝚎 𝚋𝚘𝚝 𝚒𝚜 𝚊𝚗 𝙰𝚍𝚖𝚒𝚗.")
         elif "|" in raw:
             p = [x.strip() for x in raw.split("|",1)]
             try:
                 ch_id=int(p[0]); lnk=p[1]
-                if not lnk.startswith("https://t.me/"): await update.message.reply_text("❌  𝙸𝚗𝚟𝚊𝚕𝚒𝚍 𝚕𝚒𝚗𝚔 𝚏𝚘𝚛𝚖𝚊𝚝."); return
+                if not lnk.startswith("https://t.me/"): await _reply_text(update.message, "❌  𝙸𝚗𝚟𝚊𝚕𝚒𝚍 𝚕𝚒𝚗𝚔 𝚏𝚘𝚛𝚖𝚊𝚝."); return
                 name=str(ch_id)
                 try:
                     chat=await context.bot.get_chat(ch_id); name=chat.title or name
                 except: pass
-                if ch_id in [c["id"] for c in db["channels"]]: await update.message.reply_text("⚠️  𝙰𝚕𝚛𝚎𝚊𝚍𝚢 𝚒𝚗 𝚕𝚒𝚜𝚝!")
+                if ch_id in [c["id"] for c in db["channels"]]: await _reply_text(update.message, "⚠️  𝙰𝚕𝚛𝚎𝚊𝚍𝚢 𝚒𝚗 𝚕𝚒𝚜𝚝!")
                 else:
                     db["channels"].append({"id":ch_id,"name":name,"type":"public","link":lnk,"username":""}); save_db(db)
-                    await update.message.reply_html(f"✅  <b>{name}</b> 𝚊𝚍𝚍𝚎𝚍!\n📋  𝗜𝗗  ╌  <code>{ch_id}</code>\n🔗  {lnk}")
-            except ValueError: await update.message.reply_text("❌  𝙸𝚗𝚟𝚊𝚕𝚒𝚍 𝙲𝚑𝚊𝚗𝚗𝚎𝚕 𝙸𝙳.")
-        else: await update.message.reply_html("❌  𝚄𝚜𝚎: <code>@username</code>  𝚘𝚛  <code>ID | LINK</code>")
+                    await _reply_html(update.message, f"✅  <b>{name}</b> 𝚊𝚍𝚍𝚎𝚍!\n{_premium_emoji('📋', 'PREMIUM_EMOJI_CLIPBOARD_ID')}  𝗜𝗗  ╌  <code>{ch_id}</code>\n🔗  {lnk}")
+            except ValueError: await _reply_text(update.message, "❌  𝙸𝚗𝚟𝚊𝚕𝚒𝚍 𝙲𝚑𝚊𝚗𝚗𝚎𝚕 𝙸𝙳.")
+        else: await _reply_html(update.message, "❌  𝚄𝚜𝚎: <code>@username</code>  𝚘𝚛  <code>ID | LINK</code>")
 
     elif action == "add_private_channel":
         raw = text.strip()
-        if "|" not in raw: await update.message.reply_html("❌  𝚄𝚜𝚎: <code>CHANNEL_ID | INVITATION_LINK</code>"); return
+        if "|" not in raw: await _reply_html(update.message, "❌  𝚄𝚜𝚎: <code>CHANNEL_ID | INVITATION_LINK</code>"); return
         p = [x.strip() for x in raw.split("|",1)]
         try:
             ch_id=int(p[0]); inv=p[1]
             if not (inv.startswith("https://t.me/+") or inv.startswith("https://t.me/joinchat/")):
-                await update.message.reply_text("❌  𝙻𝚒𝚗𝚔 𝚖𝚞𝚜𝚝 𝚜𝚝𝚊𝚛𝚝 𝚠𝚒𝚝𝚑 https://t.me/+"); return
+                await _reply_text(update.message, "❌  𝙻𝚒𝚗𝚔 𝚖𝚞𝚜𝚝 𝚜𝚝𝚊𝚛𝚝 𝚠𝚒𝚝𝚑 https://t.me/+"); return
             name=str(ch_id)
             try:
                 chat=await context.bot.get_chat(ch_id); name=chat.title or name
             except: pass
-            if ch_id in [c["id"] for c in db["channels"]]: await update.message.reply_text("⚠️  𝙰𝚕𝚛𝚎𝚊𝚍𝚢 𝚒𝚗 𝚕𝚒𝚜𝚝!")
+            if ch_id in [c["id"] for c in db["channels"]]: await _reply_text(update.message, "⚠️  𝙰𝚕𝚛𝚎𝚊𝚍𝚢 𝚒𝚗 𝚕𝚒𝚜𝚝!")
             else:
                 db["channels"].append({"id":ch_id,"name":name,"type":"private","link":inv,"username":""}); save_db(db)
-                await update.message.reply_html(f"✅  <b>{name}</b> 𝚊𝚍𝚍𝚎𝚍!\n📋  𝗜𝗗  ╌  <code>{ch_id}</code>\n🔗  {inv}")
-        except ValueError: await update.message.reply_text("❌  𝙸𝚗𝚟𝚊𝚕𝚒𝚍 𝙲𝚑𝚊𝚗𝚗𝚎𝚕 𝙸𝙳.")
+                await _reply_html(update.message, f"✅  <b>{name}</b> 𝚊𝚍𝚍𝚎𝚍!\n{_premium_emoji('📋', 'PREMIUM_EMOJI_CLIPBOARD_ID')}  𝗜𝗗  ╌  <code>{ch_id}</code>\n🔗  {inv}")
+        except ValueError: await _reply_text(update.message, "❌  𝙸𝚗𝚟𝚊𝚕𝚒𝚍 𝙲𝚑𝚊𝚗𝚗𝚎𝚕 𝙸𝙳.")
 
     elif action == "add_admin":
         try:
             aid=int(text.strip())
-            if aid==OWNER_ID: await update.message.reply_text("⚠️  𝙾𝚠𝚗𝚎𝚛 𝚊𝚕𝚛𝚎𝚊𝚍𝚢 𝚑𝚊𝚜 𝚑𝚒𝚐𝚑𝚎𝚜𝚝 𝚊𝚞𝚝𝚑𝚘𝚛𝚒𝚝𝚢!")
-            elif aid in db["admins"]: await update.message.reply_text("⚠️  𝙰𝚕𝚛𝚎𝚊𝚍𝚢 𝚊𝚗 𝚊𝚍𝚖𝚒𝚗!")
+            if aid==OWNER_ID: await _reply_text(update.message, "⚠️  𝙾𝚠𝚗𝚎𝚛 𝚊𝚕𝚛𝚎𝚊𝚍𝚢 𝚑𝚊𝚜 𝚑𝚒𝚐𝚑𝚎𝚜𝚝 𝚊𝚞𝚝𝚑𝚘𝚛𝚒𝚝𝚢!")
+            elif aid in db["admins"]: await _reply_text(update.message, "⚠️  𝙰𝚕𝚛𝚎𝚊𝚍𝚢 𝚊𝚗 𝚊𝚍𝚖𝚒𝚗!")
             else:
                 db["admins"].append(aid); save_db(db)
-                await update.message.reply_html(f"✅  𝙸𝙳 <code>{aid}</code> 𝚒𝚜 𝚗𝚘𝚠 𝚊𝚗 𝚊𝚍𝚖𝚒𝚗!")
-        except ValueError: await update.message.reply_text("❌  𝚂𝚎𝚗𝚍 𝚊 𝚟𝚊𝚕𝚒𝚍 𝚄𝚜𝚎𝚛 𝙸𝙳.")
+                await _reply_html(update.message, f"✅  𝙸𝙳 <code>{aid}</code> 𝚒𝚜 𝚗𝚘𝚠 𝚊𝚗 𝚊𝚍𝚖𝚒𝚗!")
+        except ValueError: await _reply_text(update.message, "❌  𝚂𝚎𝚗𝚍 𝚊 𝚟𝚊𝚕𝚒𝚍 𝚄𝚜𝚎𝚛 𝙸𝙳.")
 
     elif action == "ban_user":
         try:
             bid=int(text.strip())
-            if bid==OWNER_ID: await update.message.reply_text("❌  𝙾𝚠𝚗𝚎𝚛 𝚌𝚊𝚗𝚗𝚘𝚝 𝚋𝚎 𝚋𝚊𝚗𝚗𝚎𝚍!")
+            if bid==OWNER_ID: await _reply_text(update.message, "❌  𝙾𝚠𝚗𝚎𝚛 𝚌𝚊𝚗𝚗𝚘𝚝 𝚋𝚎 𝚋𝚊𝚗𝚗𝚎𝚍!")
             else:
                 if bid not in db["users"]: db["users"][bid]={"username":"","name":"Unknown","joined":"","banned":True,"private_acked":[]}
                 else: db["users"][bid]["banned"]=True
-                save_db(db); await update.message.reply_html(f"✅  𝙸𝙳 <code>{bid}</code> 𝚋𝚊𝚗𝚗𝚎𝚍!")
-        except ValueError: await update.message.reply_text("❌  𝚂𝚎𝚗𝚍 𝚊 𝚟𝚊𝚕𝚒𝚍 𝚄𝚜𝚎𝚛 𝙸𝙳.")
+                save_db(db); await _reply_html(update.message, f"✅  𝙸𝙳 <code>{bid}</code> 𝚋𝚊𝚗𝚗𝚎𝚍!")
+        except ValueError: await _reply_text(update.message, "❌  𝚂𝚎𝚗𝚍 𝚊 𝚟𝚊𝚕𝚒𝚍 𝚄𝚜𝚎𝚛 𝙸𝙳.")
 
     elif action == "unban_user":
         try:
             uid=int(text.strip())
             if uid in db["users"]:
                 db["users"][uid]["banned"]=False; save_db(db)
-                await update.message.reply_html(f"✅  𝙸𝙳 <code>{uid}</code> 𝚞𝚗𝚋𝚊𝚗𝚗𝚎𝚍!")
-            else: await update.message.reply_text("⚠️  𝙸𝙳 𝚗𝚘𝚝 𝚒𝚗 𝚍𝚊𝚝𝚊𝚋𝚊𝚜𝚎.")
-        except ValueError: await update.message.reply_text("❌  𝚂𝚎𝚗𝚍 𝚊 𝚟𝚊𝚕𝚒𝚍 𝚄𝚜𝚎𝚛 𝙸𝙳.")
+                await _reply_html(update.message, f"✅  𝙸𝙳 <code>{uid}</code> 𝚞𝚗𝚋𝚊𝚗𝚗𝚎𝚍!")
+            else: await _reply_text(update.message, "⚠️  𝙸𝙳 𝚗𝚘𝚝 𝚒𝚗 𝚍𝚊𝚝𝚊𝚋𝚊𝚜𝚎.")
+        except ValueError: await _reply_text(update.message, "❌  𝚂𝚎𝚗𝚍 𝚊 𝚟𝚊𝚕𝚒𝚍 𝚄𝚜𝚎𝚛 𝙸𝙳.")
 
     elif action == "broadcast":
         lines=text.strip().split("\n"); msg_lines=[]; btn_rows=[]
@@ -1057,7 +1222,7 @@ async def _process_admin_input(update, context, action, text):
             msg_lines.append(line)
         btxt="\n".join(msg_lines).strip(); markup=InlineKeyboardMarkup(btn_rows) if btn_rows else None
         total=len(db["users"]); ok=fail=0
-        prog=await update.message.reply_text(f"📣  𝙱𝚛𝚘𝚊𝚍𝚌𝚊𝚜𝚝𝚒𝚗𝚐...  0/{total}")
+        prog=await _reply_text(update.message, f"📣  𝙱𝚛𝚘𝚊𝚍𝚌𝚊𝚜𝚝𝚒𝚗𝚐...  0/{total}")
         for uid in list(db["users"].keys()):
             try: await context.bot.send_message(uid,btxt,reply_markup=markup); ok+=1
             except: fail+=1
