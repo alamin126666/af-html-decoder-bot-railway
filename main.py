@@ -837,7 +837,7 @@ async def _dev_info(update, context):
         "𝚃𝚑𝚊𝚗𝚔𝚜 𝚏𝚘𝚛 𝚟𝚒𝚜𝚒𝚝𝚒𝚗𝚐!  𝙷𝚒𝚝 𝚝𝚑𝚎 𝚋𝚞𝚝𝚝𝚘𝚗 ↓"
     )
     kb = InlineKeyboardMarkup([[
-        InlineKeyboardButton("💬  𝗖𝗼𝗻𝘁𝗮𝗰𝘁 𝗗𝗲𝘃𝗲𝗹𝗼𝗽𝗲𝗿",
+        InlineKeyboardButton("𝗖𝗼𝗻𝘁𝗮𝗰𝘁 𝗗𝗲𝘃𝗲𝗹𝗼𝗽𝗲𝗿",
                              url=f"https://t.me/{OWNER_USERNAME}",
                              style=_button_style("BUTTON_STYLE_CONTACT", "primary"),
                              icon_custom_emoji_id=_button_emoji("BUTTON_EMOJI_CONTACT"))
