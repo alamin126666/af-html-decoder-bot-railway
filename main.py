@@ -38,6 +38,7 @@ _EMOJI_ID_DEFAULTS = {
     "PREMIUM_EMOJI_LOCK_ID": "5197288647275071607",
     "PREMIUM_EMOJI_CHECK_ID": "6226699395098745883",
     "PREMIUM_EMOJI_UNLOCK_ID": "5291873529464122510",
+    "PREMIUM_EMOJI_SAMRAT_ID": "6233454545431697495",
     "PREMIUM_EMOJI_SEARCH_ID": "5188311512791393083",
     "PREMIUM_EMOJI_RDX_SEARCH_ID": "6332075107741075109",
     "PREMIUM_EMOJI_KEY_ID": "5278573677900752088",
@@ -217,17 +218,15 @@ def run_flask(): flask_app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8
 def _default_db():
     return {"users": {}, "admins": [], "channels": [],
             "settings": {"bot_active": True},
-            "stats": {"total_decodes": 0, "phpkobo": 0, "custom": 0, "rdx": 0, "server": 0}}
+            "stats": {"total_decodes": 0, "phpkobo": 0, "custom": 0, "samrat_mc": 0, "rdx": 0, "server": 0}}
 
 def load_db():
     if os.path.exists(DB_FILE):
         try:
             with open(DB_FILE, "rb") as f: data = pickle.load(f)
             for k, v in _default_db().items(): data.setdefault(k, v)
-            if "phpkobo" not in data["stats"]:
-                data["stats"].update({"phpkobo": 0, "custom": 0, "rdx": 0, "server": 0})
-            else:
-                data["stats"].setdefault("custom", 0)
+            for key, value in _default_db()["stats"].items():
+                data["stats"].setdefault(key, value)
             return data
         except Exception as e: logger.error(f"DB load error: {e}")
     return _default_db()
@@ -322,6 +321,7 @@ async def send_welcome(bot, chat_id, first_name):
         f"〔 {_premium_emoji('⚙️', 'PREMIUM_EMOJI_GEAR_ID')}  <b>𝗗𝗲𝗰𝗿𝘆𝗽𝘁𝗶𝗼𝗻 𝗘𝗻𝗴𝗶𝗻𝗲𝘀</b> 〕\n\n"
         f"◈  {_premium_emoji('⚡', 'PREMIUM_EMOJI_LIGHTNING_ID')} <b>𝗽𝗵𝗽𝗸𝗼𝗯𝗼</b>   ╌  𝖺𝗎𝗍𝗈-𝖽𝖾𝗍𝖾𝖼𝗍\n"
         "◈  🧬 <b>𝗛𝗕 𝗘𝗡𝗖 𝗩𝟭</b>  ╌  𝖺𝗎𝗍𝗈-𝖽𝖾𝗍𝖾𝖼𝗍  🆕\n"
+        "◈  🔐 <b>𝗦𝗔𝗠𝗥𝗔𝗧 𝗠𝗖</b>  ╌  𝖺𝗎𝗍𝗈-𝖽𝖾𝗍𝖾𝖼𝗍  🆕\n"
         "◈  🔓 <b>𝗥𝗗𝗫 𝘃𝟳.𝟭</b>  ╌  𝖺𝗎𝗍𝗈-𝖽𝖾𝗍𝖾𝖼𝗍  🆕\n"
         f"◈  {_premium_emoji('🖥️', 'PREMIUM_EMOJI_SERVER_ID')} <b>𝗦𝗲𝗿𝘃𝗲𝗿</b>    ╌  𝚜𝚝𝚊𝚗𝚍𝚊𝚛𝚍 𝚎𝚗𝚌\n"
         "━━━━━━━━━━━━━━━━━━\n\n"
@@ -540,6 +540,121 @@ def decode_custom_cipher(html: str) -> str:
     return decoded
 
 # ══════════════════════════════════════════════════════
+#   SAMRAT MC ENGINE  (static multi-stage XOR/KDF decoder)
+# ══════════════════════════════════════════════════════
+def detect_samrat_mc(html: str) -> bool:
+    """Identify the SAMRAT MC wrapper from its distinctive static constants."""
+    return all(re.search(pattern, html, re.I) for pattern in (
+        r'const\s+MASTER\s*=\s*new\s+Uint8Array\s*\(',
+        r'const\s+RAW_BLOBS\s*=',
+        r'const\s+KDF_ITER\s*=',
+        r'const\s+MAGIC\s*=\s*["\']POLY_45L_',
+    ))
+
+
+def _samrat_js_string(html: str, name: str) -> str:
+    match = re.search(r'const\s+' + re.escape(name) + r'\s*=\s*("(?:\\.|[^"\\])*")\s*;', html)
+    if not match:
+        raise ValueError(f"SAMRAT MC constant {name} not found")
+    return json.loads(match.group(1))
+
+
+def _samrat_hash_string(value: str, length: int) -> bytes:
+    """Mirror the wrapper's JS charCodeAt/Math.imul hash using UTF-16 units."""
+    encoded = value.encode("utf-16-le", errors="surrogatepass")
+    h1, h2 = 0x811C9DC5, 0x01000193
+    for pos in range(0, len(encoded), 2):
+        char = encoded[pos] | (encoded[pos + 1] << 8)
+        h1 = ((h1 ^ char) * 0x01000193) & 0xFFFFFFFF
+        h2 = ((h2 ^ char) * 0x85EBCA6B) & 0xFFFFFFFF
+    return bytes(((h1 >> ((j % 4) * 8)) ^ (h2 >> ((j % 4) * 8)) ^ (j * 37)) & 0xFF
+                 for j in range(length))
+
+
+def _samrat_kdf(master: bytes, seed: bytes, iterations: int) -> bytes:
+    state = bytearray(64)
+    state[:32] = master[:32]
+    state[32:64] = seed[:32]
+    hashes = [0x811C9DC5, 0x01000193, 0xDEADBEEF, 0xCAFEBABE]
+    multipliers = [0x01000193, 0x85EBCA6B, 0xC2B2AE35, 0x27D4EB2F]
+    for round_no in range(iterations):
+        for j in range(64):
+            x = state[(j + round_no) % 64] ^ (round_no & 0xFF)
+            hashes[0] = ((hashes[0] ^ x) * multipliers[0]) & 0xFFFFFFFF
+            hashes[1] = ((hashes[1] ^ (x + 1)) * multipliers[1]) & 0xFFFFFFFF
+            hashes[2] = ((hashes[2] ^ (x + 2)) * multipliers[2]) & 0xFFFFFFFF
+            hashes[3] = ((hashes[3] ^ (x + 3)) * multipliers[3]) & 0xFFFFFFFF
+    return bytes(((hashes[i % 4] >> ((i % 4) * 8)) ^ (i * 37) ^ (hashes[0] & 0xFF)) & 0xFF
+                 for i in range(32))
+
+
+def _samrat_derive_key(key: bytes, layer: int) -> bytes:
+    return bytes(key[(j + layer) % len(key)] ^ ((layer * 17 + j * 29 + 11) & 0xFF)
+                 for j in range(len(key)))
+
+
+def _samrat_decrypt_blob(blob: str, key: bytes, layers: int) -> str:
+    data = base64.b64decode(blob + "=" * ((4 - len(blob) % 4) % 4), validate=True)
+    for layer in range(layers, 0, -1):
+        layer_key = _samrat_derive_key(key, layer)
+        data = bytes(value ^ layer_key[i % len(layer_key)] ^ ((i * 31 + 7) & 0xFF)
+                     for i, value in enumerate(data))
+    return data.decode("utf-8", errors="strict")
+
+
+def _remove_samrat_owner_banner(html: str) -> str:
+    """Strip only the wrapper's injected owner banner, retaining page content."""
+    start = re.search(r'<div\b(?=[^>]*\bid\s*=\s*["\']__OWNER_HEADER__["\'])[^>]*>', html, re.I)
+    if not start:
+        return html
+    depth = 1
+    tags = re.compile(r'<div\b[^>]*>|</div\s*>', re.I)
+    for tag in tags.finditer(html, start.end()):
+        if tag.group(0).startswith("</"):
+            depth -= 1
+        elif not tag.group(0).rstrip().endswith("/>"):
+            depth += 1
+        if depth == 0:
+            return html[:start.start()] + html[tag.end():]
+    return html
+
+
+def decode_samrat_mc(html: str) -> str:
+    """Decode SAMRAT MC layers as data; never evaluate the input's JavaScript."""
+    if not detect_samrat_mc(html):
+        raise ValueError("SAMRAT MC wrapper not found")
+    master_match = re.search(r'const\s+MASTER\s*=\s*new\s+Uint8Array\s*\(\s*(\[[\d,\s]+\])\s*\)', html, re.I)
+    blobs_match = re.search(r'const\s+RAW_BLOBS\s*=\s*', html, re.I)
+    if not master_match or not blobs_match:
+        raise ValueError("SAMRAT MC key or payload not found")
+    master = bytes(json.loads(master_match.group(1)))
+    blobs, _ = json.JSONDecoder().raw_decode(html[blobs_match.end():])
+    inner = int(re.search(r'const\s+INNER\s*=\s*(\d+)', html, re.I).group(1))
+    stages = int(re.search(r'const\s+STAGES\s*=\s*(\d+)', html, re.I).group(1))
+    iterations = int(re.search(r'const\s+KDF_ITER\s*=\s*(\d+)', html, re.I).group(1))
+    magic = _samrat_js_string(html, "MAGIC")
+    owner = _samrat_js_string(html, "OWNER")
+    hash_parts = "".join(_samrat_js_string(html, name) for name in ("H1", "H2", "H3"))
+    key = _samrat_kdf(master, _samrat_hash_string(owner + hash_parts, 32), iterations)
+
+    if len(blobs) < stages:
+        raise ValueError("SAMRAT MC payload has fewer stages than declared")
+    code = None
+    for index in range(stages):
+        plaintext = _samrat_decrypt_blob(blobs[index][::-1], key, inner)
+        if not plaintext.startswith(magic):
+            raise ValueError(f"SAMRAT MC integrity marker failed at stage {index + 1}")
+        packet = json.loads(plaintext[len(magic):])
+        if packet.get("final"):
+            code = packet.get("code")
+            break
+        seed = bytes(packet["seed"])
+        key = _samrat_kdf(master, seed, iterations)
+    if not isinstance(code, str) or not re.search(r'<(?:!doctype\s+html|html\b|body\b)', code, re.I):
+        raise ValueError("SAMRAT MC final stage did not contain HTML")
+    return re.sub(r'\n{3,}', '\n\n', _remove_samrat_owner_banner(code)).strip() + '\n'
+
+# ══════════════════════════════════════════════════════
 #   RDX DECODER v7.1 ENGINE  (Node.js subprocess)
 # ══════════════════════════════════════════════════════
 def detect_rdx(html: str) -> bool:
@@ -618,7 +733,7 @@ async def _decode_start(update, context):
         "╚══════════════════════════╝\n\n"
         "𝚂𝚎𝚗𝚍 𝚢𝚘𝚞𝚛 𝚎𝚗𝚌𝚛𝚢𝚙𝚝𝚎𝚍 <b>.html</b> 𝚏𝚒𝚕𝚎 ↓\n\n"
         "🔸  <b>𝗦𝘂𝗽𝗽𝗼𝗿𝘁𝗲𝗱:</b>  .html  ╌  .htm\n\n"
-        "〔 𝙰𝚞𝚝𝚘-𝙳𝚎𝚝𝚎𝚌𝚝𝚜:  𝗽𝗵𝗽𝗸𝗼𝗯𝗼  ·  𝗥𝗗𝗫  ·  𝗦𝗲𝗿𝘃𝗲𝗿 〕"
+        "〔 𝙰𝚞𝚝𝚘-𝙳𝚎𝚝𝚎𝚌𝚝𝚜:  𝗽𝗵𝗽𝗸𝗼𝗯𝗼  ·  𝗦𝗔𝗠𝗥𝗔𝗧 𝗠𝗖  ·  𝗥𝗗𝗫  ·  𝗦𝗲𝗿𝘃𝗲𝗿 〕"
     )
 
 # ══════════════════════════════════════════════════════
@@ -647,6 +762,17 @@ _RDX = [
     (_premium_emoji("🔑", "PREMIUM_EMOJI_KEY_ID"), "𝙻𝚊𝚢𝚎𝚛 𝙳𝚎𝚌𝚘𝚍𝚒𝚗𝚐"),
     (_premium_emoji("💾", "PREMIUM_EMOJI_SAVE_ID"), "𝙾𝚞𝚝𝚙𝚞𝚝 𝚂𝚊𝚟𝚎𝚍"),
 ]
+
+_SAMRAT_MC = [
+    (_premium_emoji("🔐", "PREMIUM_EMOJI_SAMRAT_ID"), "SAMRAT MC format detected"),
+    (_premium_emoji("🧩", "PREMIUM_EMOJI_SAMRAT_ID"), "Multi-stage key derivation"),
+    (_premium_emoji("✅", "PREMIUM_EMOJI_SAMRAT_ID"), "HTML payload recovered"),
+]
+
+def _samrat_mc_msg(cur):
+    lines = [f"  {'✦' if i < cur else '⟳' if i == cur else '◌'}  {icon}  {label}{'...' if i == cur else ''}"
+             for i, (icon, label) in enumerate(_SAMRAT_MC)]
+    return f"{_premium_emoji('🔐', 'PREMIUM_EMOJI_SAMRAT_ID')}  <b>SAMRAT MC Decoder</b>\n\n" + "\n".join(lines)
 
 def _rdx_msg(cur):
     h = f"{_premium_emoji('🔓', 'PREMIUM_EMOJI_UNLOCK_ID')}  <b>𝗥𝗗𝗫  𝗗𝗲𝗰𝗿𝘆𝗽𝘁  𝗘𝗻𝗴𝗶𝗻𝗲  𝘃𝟳.𝟭</b>\n\n"
@@ -722,7 +848,20 @@ async def _do_decode(update, context, doc, fname):
                 screenshot = await take_screenshot(out_path)
                 db["stats"]["custom"] = db["stats"].get("custom", 0) + 1
 
-            # ── ENGINE 3: RDX v7.1 ────────────────────────────────
+            # ── ENGINE 3: SAMRAT MC ───────────────────────────────
+            elif detect_samrat_mc(raw):
+                for step in range(len(_SAMRAT_MC)):
+                    await safe_edit(msg, _samrat_mc_msg(step), parse_mode=ParseMode.HTML)
+                    await asyncio.sleep(0.45)
+                decoded = decode_samrat_mc(raw)
+                method = f"{_premium_emoji('🔐', 'PREMIUM_EMOJI_SAMRAT_ID')}  𝗦𝗔𝗠𝗥𝗔𝗧 𝗠𝗖 𝙴𝚗𝚐𝚒𝚗𝚎"
+                with open(out_path, "w", encoding="utf-8") as f:
+                    f.write(decoded)
+                await safe_edit(msg, f"{_premium_emoji('📸', 'PREMIUM_EMOJI_CAMERA_ID')}  𝙲𝚊𝚙𝚝𝚞𝚛𝚒𝚗𝚐 𝚜𝚌𝚛𝚎𝚎𝚗𝚜𝚑𝚘𝚝...", parse_mode=ParseMode.HTML)
+                screenshot = await take_screenshot(out_path)
+                db["stats"]["samrat_mc"] = db["stats"].get("samrat_mc", 0) + 1
+
+            # ── ENGINE 4: RDX v7.1 ────────────────────────────────
             elif detect_rdx(raw):
                 # Start decode task in background
                 rdx_task = asyncio.create_task(decode_rdx(in_path, out_path))
@@ -781,16 +920,17 @@ async def _do_decode(update, context, doc, fname):
             await safe_edit(msg, "✦  𝙳𝚘𝚗𝚎!  𝚂𝚎𝚗𝚍𝚒𝚗𝚐 𝚛𝚎𝚜𝚞𝚕𝚝𝚜...")
             await asyncio.sleep(0.4)
 
-            import io
-            await update.message.reply_photo(
-                photo=io.BytesIO(screenshot),
-            caption=_premiumize_html((
-                    f"{_premium_emoji('🖼️', 'PREMIUM_EMOJI_IMAGE_ID')}  <b>𝗣𝗮𝗴𝗲 𝗦𝗰𝗿𝗲𝗲𝗻𝘀𝗵𝗼𝘁</b>\n\n"
-                    f"{_premium_emoji('⚙️', 'PREMIUM_EMOJI_GEAR_ID')}  <b>𝗠𝗲𝘁𝗵𝗼𝗱</b>  ╌  {method}\n"
-                    f"{_premium_emoji('📎', 'PREMIUM_EMOJI_ATTACHMENT_ID')}  𝙵𝚒𝚕𝚎 𝚜𝚎𝚗𝚍𝚒𝚗𝚐 𝚋𝚎𝚕𝚘𝚠 ↓"
-            )),
-                parse_mode=ParseMode.HTML,
-            )
+            if screenshot:
+                import io
+                await update.message.reply_photo(
+                    photo=io.BytesIO(screenshot),
+                    caption=_premiumize_html((
+                        f"{_premium_emoji('🖼️', 'PREMIUM_EMOJI_IMAGE_ID')}  <b>𝗣𝗮𝗴𝗲 𝗦𝗰𝗿𝗲𝗲𝗻𝘀𝗵𝗼𝘁</b>\n\n"
+                        f"{_premium_emoji('⚙️', 'PREMIUM_EMOJI_GEAR_ID')}  <b>𝗠𝗲𝘁𝗵𝗼𝗱</b>  ╌  {method}\n"
+                        f"{_premium_emoji('📎', 'PREMIUM_EMOJI_ATTACHMENT_ID')}  𝙵𝚒𝚕𝚎 𝚜𝚎𝚗𝚍𝚒𝚗𝚐 𝚋𝚎𝚕𝚘𝚠 ↓"
+                    )),
+                    parse_mode=ParseMode.HTML,
+                )
 
             with open(out_path, "rb") as f:
                 await update.message.reply_document(
@@ -837,7 +977,7 @@ async def _dev_info(update, context):
         "𝚃𝚑𝚊𝚗𝚔𝚜 𝚏𝚘𝚛 𝚟𝚒𝚜𝚒𝚝𝚒𝚗𝚐!  𝙷𝚒𝚝 𝚝𝚑𝚎 𝚋𝚞𝚝𝚝𝚘𝚗 ↓"
     )
     kb = InlineKeyboardMarkup([[
-        InlineKeyboardButton("𝗖𝗼𝗻𝘁𝗮𝗰𝘁 𝗗𝗲𝘃𝗲𝗹𝗼𝗽𝗲𝗿",
+        InlineKeyboardButton("💬  𝗖𝗼𝗻𝘁𝗮𝗰𝘁 𝗗𝗲𝘃𝗲𝗹𝗼𝗽𝗲𝗿",
                              url=f"https://t.me/{OWNER_USERNAME}",
                              style=_button_style("BUTTON_STYLE_CONTACT", "primary"),
                              icon_custom_emoji_id=_button_emoji("BUTTON_EMOJI_CONTACT"))
@@ -851,6 +991,7 @@ async def _bot_status(update, context):
     pub  = sum(1 for c in db["channels"] if c.get("type","public") == "public")
     priv = sum(1 for c in db["channels"] if c.get("type") == "private")
     pk   = db["stats"].get("phpkobo", 0)
+    samrat_mc = db["stats"].get("samrat_mc", 0)
     rdx  = db["stats"].get("rdx", 0)
     srv  = db["stats"].get("server", 0)
     txt  = (
@@ -862,6 +1003,7 @@ async def _bot_status(update, context):
         "━━━━━━━━━━━━━━━━━━\n"
         "〔 𝗘𝗻𝗴𝗶𝗻𝗲 𝗕𝗿𝗲𝗮𝗸𝗱𝗼𝘄𝗻 〕\n\n"
         f"{_premium_emoji('⚡', 'PREMIUM_EMOJI_LIGHTNING_ID')}  <b>𝗽𝗵𝗽𝗸𝗼𝗯𝗼</b>  ╌  <b>{pk}</b>\n"
+        f"🔐  <b>𝗦𝗔𝗠𝗥𝗔𝗧 𝗠𝗖</b>  ╌  <b>{samrat_mc}</b>\n"
         f"{_premium_emoji('🔓', 'PREMIUM_EMOJI_UNLOCK_ID')}  <b>𝗥𝗗𝗫 𝘃𝟳.𝟭</b>  ╌  <b>{rdx}</b>\n"
         f"{_premium_emoji('🖥️', 'PREMIUM_EMOJI_SERVER_ID')}  <b>𝗦𝗲𝗿𝘃𝗲𝗿</b>    ╌  <b>{srv}</b>\n\n"
         "━━━━━━━━━━━━━━━━━━\n"
