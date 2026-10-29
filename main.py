@@ -738,7 +738,7 @@ async def _do_decode(update, context, doc, fname):
                     # screenshot/rendering failure must not re-run the
                     # encrypted input through the Server engine.
                     decoded    = await rdx_task
-                method     = f"{_premium_emoji('🔓', 'PREMIUM_EMOJI_UNLOCK_ID')}  𝗥𝗗𝗫 𝘃𝟳.𝟭 𝙴𝚗𝚐𝚒𝚗𝚎"
+                    method     = f"{_premium_emoji('🔓', 'PREMIUM_EMOJI_UNLOCK_ID')}  𝗥𝗗𝗫 𝘃𝟳.𝟭 𝙴𝚗𝚐𝚒𝚗𝚎"
                     with open(out_path, "w", encoding="utf-8") as f:
                         f.write(decoded)
                     db["stats"]["rdx"] = db["stats"].get("rdx", 0) + 1
