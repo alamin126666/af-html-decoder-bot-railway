@@ -40,6 +40,8 @@ _EMOJI_ID_DEFAULTS = {
     "PREMIUM_EMOJI_UNLOCK_ID": "5291873529464122510",
     "PREMIUM_EMOJI_SAMRAT_ID": "6233454545431697495",
     "PREMIUM_EMOJI_BASE777_ID": "6115956897481758272",
+    "PREMIUM_EMOJI_TMS_DECODE_ID": "5354889508674360491",
+    "PREMIUM_EMOJI_TMS_SAVE_ID": "5278306981906493285",
     "PREMIUM_EMOJI_SEARCH_ID": "5188311512791393083",
     "PREMIUM_EMOJI_RDX_SEARCH_ID": "6332075107741075109",
     "PREMIUM_EMOJI_KEY_ID": "5278573677900752088",
@@ -219,7 +221,7 @@ def run_flask(): flask_app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8
 def _default_db():
     return {"users": {}, "admins": [], "channels": [],
             "settings": {"bot_active": True},
-            "stats": {"total_decodes": 0, "phpkobo": 0, "custom": 0, "samrat_mc": 0, "base_777": 0, "rdx": 0, "server": 0}}
+            "stats": {"total_decodes": 0, "phpkobo": 0, "custom": 0, "samrat_mc": 0, "base_777": 0, "tms_cyber": 0, "rdx": 0, "server": 0}}
 
 def load_db():
     if os.path.exists(DB_FILE):
@@ -321,10 +323,11 @@ async def send_welcome(bot, chat_id, first_name):
         "━━━━━━━━━━━━━━━━━━\n"
         f"〔 {_premium_emoji('⚙️', 'PREMIUM_EMOJI_GEAR_ID')}  <b>𝗗𝗲𝗰𝗿𝘆𝗽𝘁𝗶𝗼𝗻 𝗘𝗻𝗴𝗶𝗻𝗲𝘀</b> 〕\n\n"
         f"◈  {_premium_emoji('⚡', 'PREMIUM_EMOJI_LIGHTNING_ID')} <b>𝗽𝗵𝗽𝗸𝗼𝗯𝗼</b>   ╌  𝖺𝗎𝗍𝗈-𝖽𝖾𝗍𝖾𝖼𝗍\n"
-        "◈  🧬 <b>𝗛𝗕 𝗘𝗡𝗖 𝗩𝟭</b>  ╌  𝖺𝗎𝗍𝗈-𝖽𝖾𝗍𝖾𝖼𝗍  🆕\n"
+        "◈  🧬 <b>𝗛𝗕 𝗘𝗡𝗖 𝗩𝟭</b>  ╌  𝖺𝗎𝗍𝗈-𝖽𝖾𝗍𝖾𝖼𝗍\n"
         "◈  🔐 <b>𝗦𝗔𝗠𝗥𝗔𝗧 𝗠𝗖</b>  ╌  𝖺𝗎𝗍𝗈-𝖽𝖾𝗍𝖾𝖼𝗍  🆕\n"
         f"◈  {_premium_emoji('🧱', 'PREMIUM_EMOJI_BASE777_ID')} <b>𝗕𝗔𝗦𝗘 𝟳𝟳𝟳</b>  ╌  𝖺𝗎𝗍𝗈-𝖽𝖾𝗍𝖾𝖼𝗍  🆕\n"
-        "◈  🔓 <b>𝗥𝗗𝗫 𝘃𝟳.𝟭</b>  ╌  𝖺𝗎𝗍𝗈-𝖽𝖾𝗍𝖾𝖼𝗍  🆕\n"
+        f"◈  {_premium_emoji('🛡️', 'PREMIUM_EMOJI_TMS_DECODE_ID')} <b>𝗧𝗠𝗦 𝗖𝗬𝗕𝗘𝗥</b>  ╌  𝖺𝗎𝗍𝗈-𝖽𝖾𝗍𝖾𝖼𝗍  🆕\n"
+        "◈  🔓 <b>𝗥𝗗𝗫 𝘃𝟳.𝟭</b>  ╌  𝖺𝗎𝗍𝗈-𝖽𝖾𝗍𝖾𝖼𝗍\n"
         f"◈  {_premium_emoji('🖥️', 'PREMIUM_EMOJI_SERVER_ID')} <b>𝗦𝗲𝗿𝘃𝗲𝗿</b>    ╌  𝚜𝚝𝚊𝚗𝚍𝚊𝚛𝚍 𝚎𝚗𝚌\n"
         "━━━━━━━━━━━━━━━━━━\n\n"
         "🔻  𝚄𝚜𝚎 𝚝𝚑𝚎 𝚖𝚎𝚗𝚞 𝚋𝚎𝚕𝚘𝚠 𝚝𝚘 𝚜𝚝𝚊𝚛𝚝 ↓"
@@ -686,6 +689,82 @@ def decode_base_777(html: str) -> str:
         raise ValueError("BASE 777 payload did not contain HTML")
     return decoded.strip() + "\n"
 
+
+# ══════════════════════════════════════════════════════
+#   TMS CYBER ENGINE  (symbol map + reverse Base64 + XOR/shift)
+# ══════════════════════════════════════════════════════
+def detect_tms_cyber(html: str) -> bool:
+    """Identify TMS CYBER's seven-layer symbol-mapped payload wrapper."""
+    return all(re.search(pattern, html, re.I) for pattern in (
+        r'const\s+_0xstd\s*=',
+        r'const\s+_0xemj\s*=\s*\[',
+        r'const\s+_0xdata\s*=',
+        r'const\s+_0xseed\s*=\s*\d+',
+        r'const\s+_0xstep\s*=\s*\d+',
+        r'const\s+_0xshift\s*=\s*\d+',
+        r'document\s*\.\s*write\s*\(\s*_0xdecoded\s*\)',
+    ))
+
+
+def decode_tms_cyber(html: str) -> str:
+    """Decode TMS CYBER as bytes/strings only; do not execute its JavaScript."""
+    if not detect_tms_cyber(html):
+        raise ValueError("TMS CYBER wrapper not found")
+    symbols_match = re.search(r'const\s+_0xemj\s*=\s*(\[[\s\S]*?\])\s*;', html)
+    data_match = re.search(r'const\s+_0xdata\s*=\s*("(?:\\.|[^"\\])*")\s*;', html)
+    if not (symbols_match and data_match):
+        raise ValueError("TMS CYBER symbol table or payload not found")
+
+    symbols = json.loads(symbols_match.group(1))
+    data = json.loads(data_match.group(1))
+    std_match = re.search(r'const\s+_0xstd\s*=\s*("(?:\\.|[^"\\])*")\s*;', html)
+    if not std_match:
+        raise ValueError("TMS CYBER Base64 alphabet not found")
+    standard = json.loads(std_match.group(1))
+    if len(symbols) != len(standard):
+        raise ValueError("Invalid TMS CYBER symbol table")
+
+    symbol_map = dict(zip(symbols, standard))
+    symbol_map["•"] = "="
+    reversed_base64 = "".join(symbol_map.get(char, char) for char in data)
+    encoded = reversed_base64[::-1]
+    try:
+        binary = base64.b64decode(encoded, validate=True)
+    except Exception as exc:
+        raise ValueError(f"TMS CYBER Base64 reconstruction failed: {exc}") from exc
+
+    def constant(name):
+        match = re.search(r'const\s+' + re.escape(name) + r'\s*=\s*(\d+)\s*;', html)
+        if not match:
+            raise ValueError(f"TMS CYBER constant {name} not found")
+        return int(match.group(1))
+
+    current = constant("_0xseed") & 0xFF
+    step = constant("_0xstep") & 0xFF
+    shift = constant("_0xshift")
+    output = bytearray(len(binary))
+    for i, value in enumerate(binary):
+        output[i] = ((value ^ current) - shift + 256) & 0xFF
+        current = (current + step) & 0xFF
+    try:
+        decoded = output.decode("utf-8", errors="strict")
+    except UnicodeDecodeError as exc:
+        raise ValueError(f"TMS CYBER output is not UTF-8: {exc}") from exc
+    if len(decoded) < 100 or not re.search(r'<(?:!doctype\s+html|html\b|body\b)', decoded, re.I):
+        raise ValueError("TMS CYBER result did not contain valid HTML")
+    return decoded.strip() + "\n"
+
+
+_TMS_CYBER_ANIMATION = [
+    (_premium_emoji("🔓", "PREMIUM_EMOJI_TMS_DECODE_ID"), "Decoding TMS CYBER payload"),
+    (_premium_emoji("💾", "PREMIUM_EMOJI_TMS_SAVE_ID"), "Saving and sending decoded file"),
+]
+
+
+def _tms_cyber_msg(step):
+    emoji, label = _TMS_CYBER_ANIMATION[step]
+    return f"{emoji}  <b>TMS CYBER</b>\n\n{emoji}  {label}..."
+
 # ══════════════════════════════════════════════════════
 #   RDX DECODER v7.1 ENGINE  (Node.js subprocess)
 # ══════════════════════════════════════════════════════
@@ -843,10 +922,11 @@ async def _do_decode(update, context, doc, fname):
             decoded    = None
             screenshot = None
             method     = ""
+            tms_cyber = detect_tms_cyber(raw)
 
             # Preserve the existing progress animation for the older engines.
             # BASE 777 and SAMRAT MC are intentionally direct, with no animation.
-            if not (detect_base_777(raw) or detect_samrat_mc(raw)):
+            if not (detect_base_777(raw) or detect_samrat_mc(raw) or tms_cyber):
                 await asyncio.sleep(1.1)
                 await safe_edit(msg, "🧪  𝙰𝚗𝚊𝚕𝚢𝚣𝚒𝚗𝚐 𝚎𝚗𝚌𝚛𝚢𝚙𝚝𝚒𝚘𝚗...")
 
@@ -862,7 +942,19 @@ async def _do_decode(update, context, doc, fname):
                 screenshot = await take_screenshot(out_path)
                 db["stats"]["phpkobo"] = db["stats"].get("phpkobo", 0) + 1
 
-            # ── ENGINE 2: HB ENC V1 ────────────────────────────────
+            # ── ENGINE 2: TMS CYBER ───────────────────────────────
+            # Keep this ahead of HB ENC: both wrappers use _0xemj/_0xdata.
+            elif tms_cyber:
+                await safe_edit(msg, _tms_cyber_msg(0), parse_mode=ParseMode.HTML)
+                await asyncio.sleep(0.6)
+                decoded = decode_tms_cyber(raw)
+                method = f"{_premium_emoji('🛡️', 'PREMIUM_EMOJI_TMS_DECODE_ID')}  𝗧𝗠𝗦 𝗖𝗬𝗕𝗘𝗥 𝙴𝚗𝚐𝚒𝚗𝚎"
+                with open(out_path, "w", encoding="utf-8") as f:
+                    f.write(decoded)
+                screenshot = await take_screenshot(out_path)
+                db["stats"]["tms_cyber"] = db["stats"].get("tms_cyber", 0) + 1
+
+            # ── ENGINE 3: HB ENC V1 ────────────────────────────────
             elif detect_custom_cipher(raw):
                 await safe_edit(msg, "🧬  𝗛𝗕 𝗘𝗡𝗖 𝗩𝟭 𝙳𝚎𝚝𝚎𝚌𝚝𝚎𝚍...")
                 await asyncio.sleep(1.1)
@@ -873,7 +965,7 @@ async def _do_decode(update, context, doc, fname):
                 screenshot = await take_screenshot(out_path)
                 db["stats"]["custom"] = db["stats"].get("custom", 0) + 1
 
-            # ── ENGINE 3: SAMRAT MC ───────────────────────────────
+            # ── ENGINE 4: SAMRAT MC ───────────────────────────────
             elif detect_samrat_mc(raw):
                 decoded = decode_samrat_mc(raw)
                 method = f"{_premium_emoji('🔐', 'PREMIUM_EMOJI_SAMRAT_ID')}  𝗦𝗔𝗠𝗥𝗔𝗧 𝗠𝗖 𝙴𝚗𝚐𝚒𝚗𝚎"
@@ -883,7 +975,7 @@ async def _do_decode(update, context, doc, fname):
                 screenshot = await take_screenshot(out_path)
                 db["stats"]["samrat_mc"] = db["stats"].get("samrat_mc", 0) + 1
 
-            # ── ENGINE 4: BASE 777 ────────────────────────────────
+            # ── ENGINE 5: BASE 777 ────────────────────────────────
             elif detect_base_777(raw):
                 decoded = decode_base_777(raw)
                 method = f"{_premium_emoji('🧱', 'PREMIUM_EMOJI_BASE777_ID')}  𝗕𝗔𝗦𝗘 𝟳𝟳𝟳 𝙴𝚗𝚐𝚒𝚗𝚎"
@@ -893,7 +985,7 @@ async def _do_decode(update, context, doc, fname):
                 screenshot = await take_screenshot(out_path)
                 db["stats"]["base_777"] = db["stats"].get("base_777", 0) + 1
 
-            # ── ENGINE 5: RDX v7.1 ────────────────────────────────
+            # ── ENGINE 6: RDX v7.1 ────────────────────────────────
             elif detect_rdx(raw):
                 # Start decode task in background
                 rdx_task = asyncio.create_task(decode_rdx(in_path, out_path))
@@ -949,8 +1041,12 @@ async def _do_decode(update, context, doc, fname):
             save_db(db)
 
             # ── Send results ───────────────────────────────────────
-            await safe_edit(msg, "✦  𝙳𝚘𝚗𝚎!  𝚂𝚎𝚗𝚍𝚒𝚗𝚐 𝚛𝚎𝚜𝚞𝚕𝚝𝚜...")
-            await asyncio.sleep(0.4)
+            if tms_cyber:
+                await safe_edit(msg, _tms_cyber_msg(1), parse_mode=ParseMode.HTML)
+                await asyncio.sleep(0.6)
+            else:
+                await safe_edit(msg, "✦  𝙳𝚘𝚗𝚎!  𝚂𝚎𝚗𝚍𝚒𝚗𝚐 𝚛𝚎𝚜𝚞𝚕𝚝𝚜...")
+                await asyncio.sleep(0.4)
 
             if screenshot:
                 import io
@@ -1009,7 +1105,7 @@ async def _dev_info(update, context):
         "𝚃𝚑𝚊𝚗𝚔𝚜 𝚏𝚘𝚛 𝚟𝚒𝚜𝚒𝚝𝚒𝚗𝚐!  𝙷𝚒𝚝 𝚝𝚑𝚎 𝚋𝚞𝚝𝚝𝚘𝚗 ↓"
     )
     kb = InlineKeyboardMarkup([[
-        InlineKeyboardButton("💬  𝗖𝗼𝗻𝘁𝗮𝗰𝘁 𝗗𝗲𝘃𝗲𝗹𝗼𝗽𝗲𝗿",
+        InlineKeyboardButton("𝗖𝗼𝗻𝘁𝗮𝗰𝘁 𝗗𝗲𝘃𝗲𝗹𝗼𝗽𝗲𝗿",
                              url=f"https://t.me/{OWNER_USERNAME}",
                              style=_button_style("BUTTON_STYLE_CONTACT", "primary"),
                              icon_custom_emoji_id=_button_emoji("BUTTON_EMOJI_CONTACT"))
@@ -1025,6 +1121,7 @@ async def _bot_status(update, context):
     pk   = db["stats"].get("phpkobo", 0)
     samrat_mc = db["stats"].get("samrat_mc", 0)
     base_777 = db["stats"].get("base_777", 0)
+    tms_cyber = db["stats"].get("tms_cyber", 0)
     rdx  = db["stats"].get("rdx", 0)
     srv  = db["stats"].get("server", 0)
     txt  = (
@@ -1038,6 +1135,7 @@ async def _bot_status(update, context):
         f"{_premium_emoji('⚡', 'PREMIUM_EMOJI_LIGHTNING_ID')}  <b>𝗽𝗵𝗽𝗸𝗼𝗯𝗼</b>  ╌  <b>{pk}</b>\n"
         f"🔐  <b>𝗦𝗔𝗠𝗥𝗔𝗧 𝗠𝗖</b>  ╌  <b>{samrat_mc}</b>\n"
         f"{_premium_emoji('🧱', 'PREMIUM_EMOJI_BASE777_ID')}  <b>𝗕𝗔𝗦𝗘 𝟳𝟳𝟳</b>  ╌  <b>{base_777}</b>\n"
+        f"{_premium_emoji('🛡️', 'PREMIUM_EMOJI_TMS_DECODE_ID')}  <b>𝗧𝗠𝗦 𝗖𝗬𝗕𝗘𝗥</b>  ╌  <b>{tms_cyber}</b>\n"
         f"{_premium_emoji('🔓', 'PREMIUM_EMOJI_UNLOCK_ID')}  <b>𝗥𝗗𝗫 𝘃𝟳.𝟭</b>  ╌  <b>{rdx}</b>\n"
         f"{_premium_emoji('🖥️', 'PREMIUM_EMOJI_SERVER_ID')}  <b>𝗦𝗲𝗿𝘃𝗲𝗿</b>    ╌  <b>{srv}</b>\n\n"
         "━━━━━━━━━━━━━━━━━━\n"
