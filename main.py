@@ -39,6 +39,7 @@ _EMOJI_ID_DEFAULTS = {
     "PREMIUM_EMOJI_CHECK_ID": "6226699395098745883",
     "PREMIUM_EMOJI_UNLOCK_ID": "5291873529464122510",
     "PREMIUM_EMOJI_SAMRAT_ID": "6233454545431697495",
+    "PREMIUM_EMOJI_BASE777_ID": "6115956897481758272",
     "PREMIUM_EMOJI_SEARCH_ID": "5188311512791393083",
     "PREMIUM_EMOJI_RDX_SEARCH_ID": "6332075107741075109",
     "PREMIUM_EMOJI_KEY_ID": "5278573677900752088",
@@ -218,7 +219,7 @@ def run_flask(): flask_app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8
 def _default_db():
     return {"users": {}, "admins": [], "channels": [],
             "settings": {"bot_active": True},
-            "stats": {"total_decodes": 0, "phpkobo": 0, "custom": 0, "samrat_mc": 0, "rdx": 0, "server": 0}}
+            "stats": {"total_decodes": 0, "phpkobo": 0, "custom": 0, "samrat_mc": 0, "base_777": 0, "rdx": 0, "server": 0}}
 
 def load_db():
     if os.path.exists(DB_FILE):
@@ -307,7 +308,7 @@ def main_kb():
     )
 
 # ══════════════════════════════════════════════════════
-#   WELCOME  — NEW DESIGN  (3 Engines, New Font)
+#   WELCOME  — NEW DESIGN  (Auto-Detect Engines)
 # ══════════════════════════════════════════════════════
 async def send_welcome(bot, chat_id, first_name):
     txt = (
@@ -322,6 +323,7 @@ async def send_welcome(bot, chat_id, first_name):
         f"◈  {_premium_emoji('⚡', 'PREMIUM_EMOJI_LIGHTNING_ID')} <b>𝗽𝗵𝗽𝗸𝗼𝗯𝗼</b>   ╌  𝖺𝗎𝗍𝗈-𝖽𝖾𝗍𝖾𝖼𝗍\n"
         "◈  🧬 <b>𝗛𝗕 𝗘𝗡𝗖 𝗩𝟭</b>  ╌  𝖺𝗎𝗍𝗈-𝖽𝖾𝗍𝖾𝖼𝗍  🆕\n"
         "◈  🔐 <b>𝗦𝗔𝗠𝗥𝗔𝗧 𝗠𝗖</b>  ╌  𝖺𝗎𝗍𝗈-𝖽𝖾𝗍𝖾𝖼𝗍  🆕\n"
+        f"◈  {_premium_emoji('🧱', 'PREMIUM_EMOJI_BASE777_ID')} <b>𝗕𝗔𝗦𝗘 𝟳𝟳𝟳</b>  ╌  𝖺𝗎𝗍𝗈-𝖽𝖾𝗍𝖾𝖼𝗍  🆕\n"
         "◈  🔓 <b>𝗥𝗗𝗫 𝘃𝟳.𝟭</b>  ╌  𝖺𝗎𝗍𝗈-𝖽𝖾𝗍𝖾𝖼𝗍  🆕\n"
         f"◈  {_premium_emoji('🖥️', 'PREMIUM_EMOJI_SERVER_ID')} <b>𝗦𝗲𝗿𝘃𝗲𝗿</b>    ╌  𝚜𝚝𝚊𝚗𝚍𝚊𝚛𝚍 𝚎𝚗𝚌\n"
         "━━━━━━━━━━━━━━━━━━\n\n"
@@ -654,6 +656,36 @@ def decode_samrat_mc(html: str) -> str:
         raise ValueError("SAMRAT MC final stage did not contain HTML")
     return re.sub(r'\n{3,}', '\n\n', _remove_samrat_owner_banner(code)).strip() + '\n'
 
+
+# ══════════════════════════════════════════════════════
+#   BASE 777 ENGINE  (static Base64 HTML wrapper)
+# ══════════════════════════════════════════════════════
+def detect_base_777(html: str) -> bool:
+    """Detect BASE 777's encoded HTML wrapper without running its JavaScript."""
+    return bool(
+        re.search(r'var\s+encoded\s*=\s*"(?:\\.|[^"\\])*"\s*;', html)
+        and re.search(r'atob\s*\(\s*encoded\s*\)', html, re.I)
+        and re.search(r'document\s*\.\s*write\s*\(\s*html\s*\)', html, re.I)
+        and re.search(r'new\s+TextDecoder\s*\(', html, re.I)
+    )
+
+
+def decode_base_777(html: str) -> str:
+    """Recover BASE 777 HTML from Base64 data; never execute the wrapper JS."""
+    if not detect_base_777(html):
+        raise ValueError("BASE 777 wrapper not found")
+    match = re.search(r'var\s+encoded\s*=\s*("(?:\\.|[^"\\])*")\s*;', html)
+    if not match:
+        raise ValueError("BASE 777 encoded payload not found")
+    encoded = json.loads(match.group(1))
+    try:
+        decoded = base64.b64decode(encoded, validate=True).decode("utf-8", errors="strict")
+    except Exception as exc:
+        raise ValueError(f"BASE 777 Base64 payload is invalid: {exc}") from exc
+    if len(decoded) < 100 or not re.search(r'<(?:!doctype\s+html|html\b|body\b)', decoded, re.I):
+        raise ValueError("BASE 777 payload did not contain HTML")
+    return decoded.strip() + "\n"
+
 # ══════════════════════════════════════════════════════
 #   RDX DECODER v7.1 ENGINE  (Node.js subprocess)
 # ══════════════════════════════════════════════════════
@@ -763,17 +795,6 @@ _RDX = [
     (_premium_emoji("💾", "PREMIUM_EMOJI_SAVE_ID"), "𝙾𝚞𝚝𝚙𝚞𝚝 𝚂𝚊𝚟𝚎𝚍"),
 ]
 
-_SAMRAT_MC = [
-    (_premium_emoji("🔐", "PREMIUM_EMOJI_SAMRAT_ID"), "SAMRAT MC format detected"),
-    (_premium_emoji("🧩", "PREMIUM_EMOJI_SAMRAT_ID"), "Multi-stage key derivation"),
-    (_premium_emoji("✅", "PREMIUM_EMOJI_SAMRAT_ID"), "HTML payload recovered"),
-]
-
-def _samrat_mc_msg(cur):
-    lines = [f"  {'✦' if i < cur else '⟳' if i == cur else '◌'}  {icon}  {label}{'...' if i == cur else ''}"
-             for i, (icon, label) in enumerate(_SAMRAT_MC)]
-    return f"{_premium_emoji('🔐', 'PREMIUM_EMOJI_SAMRAT_ID')}  <b>SAMRAT MC Decoder</b>\n\n" + "\n".join(lines)
-
 def _rdx_msg(cur):
     h = f"{_premium_emoji('🔓', 'PREMIUM_EMOJI_UNLOCK_ID')}  <b>𝗥𝗗𝗫  𝗗𝗲𝗰𝗿𝘆𝗽𝘁  𝗘𝗻𝗴𝗶𝗻𝗲  𝘃𝟳.𝟭</b>\n\n"
     lines = []
@@ -803,12 +824,10 @@ def _br_msg(idx):
     )
 
 # ══════════════════════════════════════════════════════
-#   DECODE  STEP 2 — PROCESS  (Auto-Detect: PK → RDX → Server)
+#   DECODE  STEP 2 — PROCESS  (Automatic engine detection)
 # ══════════════════════════════════════════════════════
 async def _do_decode(update, context, doc, fname):
     msg = await _reply_text(update.message, "🛰️  𝙴𝚜𝚝𝚊𝚋𝚕𝚒𝚜𝚑𝚒𝚗𝚐 𝚌𝚘𝚗𝚗𝚎𝚌𝚝𝚒𝚘𝚗...")
-    await asyncio.sleep(1.1)
-    await safe_edit(msg, "🧪  𝙰𝚗𝚊𝚕𝚢𝚣𝚒𝚗𝚐 𝚎𝚗𝚌𝚛𝚢𝚙𝚝𝚒𝚘𝚗...")
 
     try:
         file_obj = await context.bot.get_file(doc.file_id)
@@ -824,6 +843,12 @@ async def _do_decode(update, context, doc, fname):
             decoded    = None
             screenshot = None
             method     = ""
+
+            # Preserve the existing progress animation for the older engines.
+            # BASE 777 and SAMRAT MC are intentionally direct, with no animation.
+            if not (detect_base_777(raw) or detect_samrat_mc(raw)):
+                await asyncio.sleep(1.1)
+                await safe_edit(msg, "🧪  𝙰𝚗𝚊𝚕𝚢𝚣𝚒𝚗𝚐 𝚎𝚗𝚌𝚛𝚢𝚙𝚝𝚒𝚘𝚗...")
 
             # ── ENGINE 1: phpkobo ──────────────────────────────────
             if detect_phpkobo(raw):
@@ -850,9 +875,6 @@ async def _do_decode(update, context, doc, fname):
 
             # ── ENGINE 3: SAMRAT MC ───────────────────────────────
             elif detect_samrat_mc(raw):
-                for step in range(len(_SAMRAT_MC)):
-                    await safe_edit(msg, _samrat_mc_msg(step), parse_mode=ParseMode.HTML)
-                    await asyncio.sleep(0.45)
                 decoded = decode_samrat_mc(raw)
                 method = f"{_premium_emoji('🔐', 'PREMIUM_EMOJI_SAMRAT_ID')}  𝗦𝗔𝗠𝗥𝗔𝗧 𝗠𝗖 𝙴𝚗𝚐𝚒𝚗𝚎"
                 with open(out_path, "w", encoding="utf-8") as f:
@@ -861,7 +883,17 @@ async def _do_decode(update, context, doc, fname):
                 screenshot = await take_screenshot(out_path)
                 db["stats"]["samrat_mc"] = db["stats"].get("samrat_mc", 0) + 1
 
-            # ── ENGINE 4: RDX v7.1 ────────────────────────────────
+            # ── ENGINE 4: BASE 777 ────────────────────────────────
+            elif detect_base_777(raw):
+                decoded = decode_base_777(raw)
+                method = f"{_premium_emoji('🧱', 'PREMIUM_EMOJI_BASE777_ID')}  𝗕𝗔𝗦𝗘 𝟳𝟳𝟳 𝙴𝚗𝚐𝚒𝚗𝚎"
+                with open(out_path, "w", encoding="utf-8") as f:
+                    f.write(decoded)
+                await safe_edit(msg, f"{_premium_emoji('📸', 'PREMIUM_EMOJI_CAMERA_ID')}  𝙲𝚊𝚙𝚝𝚞𝚛𝚒𝚗𝚐 𝚜𝚌𝚛𝚎𝚎𝚗𝚜𝚑𝚘𝚝...", parse_mode=ParseMode.HTML)
+                screenshot = await take_screenshot(out_path)
+                db["stats"]["base_777"] = db["stats"].get("base_777", 0) + 1
+
+            # ── ENGINE 5: RDX v7.1 ────────────────────────────────
             elif detect_rdx(raw):
                 # Start decode task in background
                 rdx_task = asyncio.create_task(decode_rdx(in_path, out_path))
@@ -992,6 +1024,7 @@ async def _bot_status(update, context):
     priv = sum(1 for c in db["channels"] if c.get("type") == "private")
     pk   = db["stats"].get("phpkobo", 0)
     samrat_mc = db["stats"].get("samrat_mc", 0)
+    base_777 = db["stats"].get("base_777", 0)
     rdx  = db["stats"].get("rdx", 0)
     srv  = db["stats"].get("server", 0)
     txt  = (
@@ -1004,6 +1037,7 @@ async def _bot_status(update, context):
         "〔 𝗘𝗻𝗴𝗶𝗻𝗲 𝗕𝗿𝗲𝗮𝗸𝗱𝗼𝘄𝗻 〕\n\n"
         f"{_premium_emoji('⚡', 'PREMIUM_EMOJI_LIGHTNING_ID')}  <b>𝗽𝗵𝗽𝗸𝗼𝗯𝗼</b>  ╌  <b>{pk}</b>\n"
         f"🔐  <b>𝗦𝗔𝗠𝗥𝗔𝗧 𝗠𝗖</b>  ╌  <b>{samrat_mc}</b>\n"
+        f"{_premium_emoji('🧱', 'PREMIUM_EMOJI_BASE777_ID')}  <b>𝗕𝗔𝗦𝗘 𝟳𝟳𝟳</b>  ╌  <b>{base_777}</b>\n"
         f"{_premium_emoji('🔓', 'PREMIUM_EMOJI_UNLOCK_ID')}  <b>𝗥𝗗𝗫 𝘃𝟳.𝟭</b>  ╌  <b>{rdx}</b>\n"
         f"{_premium_emoji('🖥️', 'PREMIUM_EMOJI_SERVER_ID')}  <b>𝗦𝗲𝗿𝘃𝗲𝗿</b>    ╌  <b>{srv}</b>\n\n"
         "━━━━━━━━━━━━━━━━━━\n"
